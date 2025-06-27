@@ -448,6 +448,10 @@
                 this.lineBuffer = '';
                 this.testMode = false;
                 this.testDataIndex = 0;
+                this.errorCount = 0;
+                this.maxConsecutiveErrors = 10;
+                this.lastErrorTime = 0;
+                this.errorThrottleMs = 1000; // Only log same error once per second
                 
                 this.connectBtn = document.getElementById('connectBtn');
                 this.disconnectBtn = document.getElementById('disconnectBtn');
@@ -747,6 +751,124 @@
                 };
             }
 
+            showSerialError(errorType, errorMessage, suggestions = []) {
+                const timestamp = new Date().toLocaleTimeString();
+                
+                // Throttle error messages to prevent spam
+                const now = Date.now();
+                if (now - this.lastErrorTime < this.errorThrottleMs) {
+                    this.errorCount++;
+                    return;
+                }
+                this.lastErrorTime = now;
+                
+                let detailedMessage = `<strong>Serial Communication Error (${errorType}):</strong> ${errorMessage}`;
+                
+                if (this.errorCount > 1) {
+                    detailedMessage += `<br><em>Error repeated ${this.errorCount} times in the last ${this.errorThrottleMs/1000} second(s)</em>`;
+                }
+                
+                detailedMessage += '<br><br><strong>Possible causes and solutions:</strong><ul>';
+                
+                // Add specific suggestions based on error type
+                suggestions.forEach(suggestion => {
+                    detailedMessage += `<li>${suggestion}</li>`;
+                });
+                
+                detailedMessage += '</ul>';
+                
+                this.addToLog(`[${timestamp}] Serial Error: ${errorType} - ${errorMessage} (Count: ${this.errorCount + 1})`);
+                this.showError(`Serial Communication Error (${errorType})`, detailedMessage);
+                
+                this.errorCount = 0; // Reset after displaying
+            }
+
+            getSerialErrorDetails(error) {
+                const errorMessage = error.message.toLowerCase();
+                
+                if (errorMessage.includes('parity error')) {
+                    return {
+                        type: 'Parity Error',
+                        message: 'Data transmission parity mismatch detected',
+                        suggestions: [
+                            'Check if the scale uses different parity settings (try None, Odd, or Even)',
+                            'Verify the baud rate matches the scale\'s configuration',
+                            'Check for electrical interference or poor cable connections',
+                            'Try a different USB cable or port',
+                            'Ensure the scale is properly grounded',
+                            'Some scales use 8 data bits with no parity instead of 7 bits with even parity'
+                        ]
+                    };
+                }
+                
+                if (errorMessage.includes('framing error')) {
+                    return {
+                        type: 'Framing Error',
+                        message: 'Invalid data frame structure received',
+                        suggestions: [
+                            'Check stop bit configuration (1 vs 2 stop bits)',
+                            'Verify baud rate settings match the scale',
+                            'Check for timing issues or clock drift',
+                            'Try a shorter, higher quality USB cable'
+                        ]
+                    };
+                }
+                
+                if (errorMessage.includes('overrun') || errorMessage.includes('buffer')) {
+                    return {
+                        type: 'Buffer Overrun',
+                        message: 'Data received faster than it can be processed',
+                        suggestions: [
+                            'System may be overloaded - close other applications',
+                            'Try a lower baud rate',
+                            'Check if the scale is sending data too frequently',
+                            'Restart the browser to clear any memory issues'
+                        ]
+                    };
+                }
+                
+                if (errorMessage.includes('timeout')) {
+                    return {
+                        type: 'Timeout Error',
+                        message: 'No response received from scale within expected time',
+                        suggestions: [
+                            'Check if the scale is powered on and responding',
+                            'Verify cable connections are secure',
+                            'Scale may be in sleep mode - activate it',
+                            'Try a different baud rate',
+                            'Check if another application is using the scale'
+                        ]
+                    };
+                }
+                
+                if (errorMessage.includes('device disconnected') || errorMessage.includes('stream ended')) {
+                    return {
+                        type: 'Connection Lost',
+                        message: 'Physical connection to scale was lost',
+                        suggestions: [
+                            'Check USB cable connections',
+                            'Try a different USB port',
+                            'Scale may have been powered off',
+                            'USB hub may have lost power',
+                            'Try reconnecting the scale'
+                        ]
+                    };
+                }
+                
+                // Generic error
+                return {
+                    type: 'Communication Error',
+                    message: error.message,
+                    suggestions: [
+                        'Check all cable connections',
+                        'Verify scale power and status',
+                        'Try different serial port settings',
+                        'Restart both the scale and computer',
+                        'Check for electromagnetic interference'
+                    ]
+                };
+            }
+
             async readSingleWeight() {
                 if (this.testMode) {
                     // Generate test response
@@ -768,6 +890,9 @@
                         throw new Error('Stream ended - device may be disconnected');
                     }
 
+                    // Reset error count on successful read
+                    this.errorCount = 0;
+
                     // Process the chunk and extract complete lines
                     const lines = this.processDataChunk(result.value);
                     
@@ -782,28 +907,26 @@
                     }
 
                 } catch (error) {
-                    this.addToLog(`Read error: ${error.message}`);
+                    this.errorCount++;
+                    
+                    // Check if we've hit the maximum consecutive errors
+                    if (this.errorCount >= this.maxConsecutiveErrors) {
+                        const errorDetails = this.getSerialErrorDetails(error);
+                        this.showSerialError(errorDetails.type, errorDetails.message, errorDetails.suggestions);
+                        
+                        // Stop reading to prevent further error spam
+                        this.addToLog(`Stopping reading due to ${this.maxConsecutiveErrors} consecutive errors`);
+                        this.stopReading();
+                        return { weight: null, unit: null, status: 'error' };
+                    }
+                    
+                    // For occasional errors, just log briefly
+                    if (this.errorCount === 1 || this.errorCount % 5 === 0) {
+                        this.addToLog(`Read error (${this.errorCount}): ${error.message}`);
+                    }
+                    
                     return { weight: null, unit: null, status: 'error' };
                 }
-            }
-
-            processDataChunk(chunk) {
-                // Decode the chunk and add to buffer
-                const decoder = new TextDecoder('ascii');
-                const text = decoder.decode(chunk, { stream: true });
-                this.lineBuffer += text;
-
-                const lines = [];
-                let lineEnd;
-                
-                // Extract complete lines ending with \r\n
-                while ((lineEnd = this.lineBuffer.indexOf('\r\n')) !== -1) {
-                    const line = this.lineBuffer.slice(0, lineEnd);
-                    lines.push(line);
-                    this.lineBuffer = this.lineBuffer.slice(lineEnd + 2);
-                }
-                
-                return lines;
             }
 
             async startReading() {
@@ -812,6 +935,9 @@
                     return;
                 }
 
+                // Reset error tracking when starting
+                this.errorCount = 0;
+                this.lastErrorTime = 0;
                 this.isReading = true;
                 
                 if (this.testMode) {
@@ -841,6 +967,9 @@
                             try {
                                 const result = await this.readSingleWeight();
                                 
+                                // Stop reading if we've been stopped due to errors
+                                if (!this.isReading) break;
+                                
                                 // Only update display if we got actual weight data
                                 if (result.status !== 'reading') {
                                     this.updateWeightDisplay(result.weight, result.unit, result.status);
@@ -851,6 +980,10 @@
                                         this.addToLog(`Status: ${result.status}`);
                                     }
                                 }
+                                
+                                // Small delay to prevent overwhelming the system
+                                await new Promise(resolve => setTimeout(resolve, 10));
+                                
                             } catch (error) {
                                 this.addToLog(`Read loop error: ${error.message}`);
                                 break;
