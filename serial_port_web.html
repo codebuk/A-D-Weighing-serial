@@ -219,7 +219,7 @@
                 this.canvas = document.getElementById(canvasId);
                 this.ctx = this.canvas.getContext('2d');
                 this.data = [];
-                this.maxDataPoints = 100; // Keep last 100 readings
+                this.maxDataPoints = 100;
                 this.colors = {
                     stable: '#28a745',
                     unstable: '#ffc107', 
@@ -234,7 +234,7 @@
             resizeCanvas() {
                 const container = this.canvas.parentElement;
                 const rect = container.getBoundingClientRect();
-                this.canvas.width = rect.width - 40; // Account for padding
+                this.canvas.width = rect.width - 40;
                 this.canvas.height = 300;
                 this.redraw();
             }
@@ -246,7 +246,6 @@
                     timestamp: timestamp || new Date()
                 });
                 
-                // Keep only the last maxDataPoints
                 if (this.data.length > this.maxDataPoints) {
                     this.data.shift();
                 }
@@ -254,23 +253,23 @@
                 this.redraw();
             }
             
-            drawEmpty() {
-                this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-                this.ctx.fillStyle = '#666';
-                this.ctx.font = '14px Arial';
-                this.ctx.textAlign = 'center';
-                this.ctx.fillText('No weight data available', this.canvas.width / 2, this.canvas.height / 2);
+            clear() {
+                this.data = [];
+                this.redraw();
             }
-            
+
             redraw() {
                 if (this.data.length === 0) {
-                    this.drawEmpty();
+                    this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+                    this.ctx.fillStyle = '#666';
+                    this.ctx.font = '14px Arial';
+                    this.ctx.textAlign = 'center';
+                    this.ctx.fillText('No weight data available', this.canvas.width / 2, this.canvas.height / 2);
                     return;
                 }
                 
                 this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
                 
-                // Fixed scale: 0 to 100kg
                 const minWeight = 0;
                 const maxWeight = 100;
                 const weightRange = maxWeight - minWeight;
@@ -279,121 +278,42 @@
                 const chartWidth = this.canvas.width - 2 * padding;
                 const chartHeight = this.canvas.height - 2 * padding;
                 
-                // Draw axes
                 this.drawAxes(padding, chartWidth, chartHeight, minWeight, maxWeight);
-                
-                // Draw data points and lines
                 this.drawDataPoints(padding, chartWidth, chartHeight, minWeight, weightRange);
             }
-            
+
             drawAxes(padding, chartWidth, chartHeight, minWeight, maxWeight) {
                 this.ctx.strokeStyle = '#333';
                 this.ctx.lineWidth = 1;
                 
-                // Y-axis
                 this.ctx.beginPath();
                 this.ctx.moveTo(padding, padding);
                 this.ctx.lineTo(padding, padding + chartHeight);
                 this.ctx.stroke();
                 
-                // X-axis
                 this.ctx.beginPath();
                 this.ctx.moveTo(padding, padding + chartHeight);
                 this.ctx.lineTo(padding + chartWidth, padding + chartHeight);
                 this.ctx.stroke();
                 
-                // Y-axis labels - fixed 0-100kg scale
                 this.ctx.fillStyle = '#333';
                 this.ctx.font = '10px Arial';
                 this.ctx.textAlign = 'right';
                 
                 for (let i = 0; i <= 10; i++) {
                     const y = padding + (chartHeight * i / 10);
-                    const weight = maxWeight - (i * 10); // 100, 90, 80, ... 10, 0
+                    const weight = maxWeight - (i * 10);
                     this.ctx.fillText(`${weight}kg`, padding - 3, y + 2);
                 }
-                
-                // X-axis labels (time) - smaller font
-                this.ctx.textAlign = 'center';
-                this.ctx.font = '9px Arial';
-                for (let i = 0; i <= 4; i++) {
-                    const x = padding + (chartWidth * i / 4);
-                    const secondsAgo = (this.maxDataPoints * (4 - i) / 4);
-                    this.ctx.fillText(`-${Math.round(secondsAgo)}s`, x, padding + chartHeight + 12);
-                }
-                
-                // Add grid lines for better readability
-                this.ctx.strokeStyle = '#eee';
-                this.ctx.lineWidth = 0.5;
-                
-                // Horizontal grid lines (every 10kg)
-                for (let i = 1; i < 10; i++) {
-                    const y = padding + (chartHeight * i / 10);
-                    this.ctx.beginPath();
-                    this.ctx.moveTo(padding, y);
-                    this.ctx.lineTo(padding + chartWidth, y);
-                    this.ctx.stroke();
-                }
-                
-                // Vertical grid lines
-                for (let i = 1; i < 4; i++) {
-                    const x = padding + (chartWidth * i / 4);
-                    this.ctx.beginPath();
-                    this.ctx.moveTo(x, padding);
-                    this.ctx.lineTo(x, padding + chartHeight);
-                    this.ctx.stroke();
-                }
             }
-            
+
             drawDataPoints(padding, chartWidth, chartHeight, minWeight, weightRange) {
-                if (this.data.length < 2) return;
-                
                 const validData = this.data.filter(d => d.weight !== null);
                 if (validData.length < 2) return;
                 
-                // Draw connecting lines by status
-                const statusGroups = {};
-                validData.forEach((point, index) => {
-                    if (!statusGroups[point.status]) {
-                        statusGroups[point.status] = [];
-                    }
-                    const dataIndex = this.data.indexOf(point);
-                    
-                    // Clamp weight values to 0-100kg range for display
-                    const clampedWeight = Math.max(0, Math.min(100, point.weight));
-                    
-                    statusGroups[point.status].push({
-                        ...point,
-                        x: padding + (chartWidth * dataIndex / (this.data.length - 1)),
-                        y: padding + chartHeight - ((clampedWeight - minWeight) / weightRange) * chartHeight
-                    });
-                });
-                
-                // Draw lines for each status
-                Object.keys(statusGroups).forEach(status => {
-                    const points = statusGroups[status];
-                    if (points.length < 2) return;
-                    
-                    this.ctx.strokeStyle = this.colors[status] || '#666';
-                    this.ctx.lineWidth = 2;
-                    this.ctx.beginPath();
-                    
-                    points.forEach((point, index) => {
-                        if (index === 0) {
-                            this.ctx.moveTo(point.x, point.y);
-                        } else {
-                            this.ctx.lineTo(point.x, point.y);
-                        }
-                    });
-                    this.ctx.stroke();
-                });
-                
-                // Draw data points
                 validData.forEach((point, index) => {
                     const dataIndex = this.data.indexOf(point);
                     const x = padding + (chartWidth * dataIndex / (this.data.length - 1));
-                    
-                    // Clamp weight values to 0-100kg range for display
                     const clampedWeight = Math.max(0, Math.min(100, point.weight));
                     const y = padding + chartHeight - ((clampedWeight - minWeight) / weightRange) * chartHeight;
                     
@@ -401,40 +321,7 @@
                     this.ctx.beginPath();
                     this.ctx.arc(x, y, 3, 0, 2 * Math.PI);
                     this.ctx.fill();
-                    
-                    // Show warning indicator for out-of-range values
-                    if (point.weight > 100) {
-                        this.ctx.strokeStyle = '#ff0000';
-                        this.ctx.lineWidth = 2;
-                        this.ctx.beginPath();
-                        this.ctx.arc(x, padding + 5, 5, 0, 2 * Math.PI);
-                        this.ctx.stroke();
-                        
-                        // Add "!" symbol for overrange
-                        this.ctx.fillStyle = '#ff0000';
-                        this.ctx.font = 'bold 12px Arial';
-                        this.ctx.textAlign = 'center';
-                        this.ctx.fillText('!', x, padding + 9);
-                    }
                 });
-                
-                // Draw status indicators for non-weight points
-                this.data.forEach((point, index) => {
-                    if (point.weight === null) {
-                        const x = padding + (chartWidth * index / (this.data.length - 1));
-                        const y = padding + chartHeight + 25;
-                        
-                        this.ctx.fillStyle = this.colors[point.status] || '#666';
-                        this.ctx.beginPath();
-                        this.ctx.arc(x, y, 4, 0, 2 * Math.PI);
-                        this.ctx.fill();
-                    }
-                });
-            }
-            
-            clear() {
-                this.data = [];
-                this.redraw();
             }
         }
 
@@ -450,8 +337,6 @@
                 this.testDataIndex = 0;
                 this.errorCount = 0;
                 this.maxConsecutiveErrors = 10;
-                this.lastErrorTime = 0;
-                this.errorThrottleMs = 1000; // Only log same error once per second
                 
                 this.connectBtn = document.getElementById('connectBtn');
                 this.disconnectBtn = document.getElementById('disconnectBtn');
@@ -465,31 +350,21 @@
                 this.errorInfo = document.getElementById('errorInfo');
                 this.testInfo = document.getElementById('testInfo');
                 
-                // Initialize chart
                 this.chart = new WeightChart('weightChart');
                 
-                // Test data responses covering all states
                 this.testResponses = [
-                    'ST,GS,+00150.25 kg',  // Stable weight
-                    'ST,GS,+00150.30 kg',  // Stable weight slight change
-                    'US,GS,+00149.80 kg',  // Unstable weight
-                    'US,GS,+00151.20 kg',  // Unstable weight
-                    'ST,GS,+00150.00 kg',  // Back to stable
-                    'I',                   // Scale unstable indicator
-                    'ST,GS,+00000.00 kg',  // Zero weight
-                    'US,GS,+00149.95 kg',  // Unstable near 150
-                    'ST,GS,+00150.50 kg',  // Stable again
-                    'OL',                  // Overload condition
-                    'ST,GS,+00150.25 kg',  // Back to normal
-                    '?',                   // Invalid command response
-                    'ST,GS,+00150.15 kg',  // Normal operation
-                    'US,GS,+02500.75 lb',  // Different unit (pounds)
-                    'ST,GS,+02500.00 lb',  // Stable pounds
-                    'UNKNOWN,DATA',        // Unknown response format
-                    'ST,GS,+00000.05 kg',  // Near zero
-                    'US,GS,+00000.01 kg',  // Unstable near zero
-                    'ST,GS,+00999.99 kg',  // Large weight
-                    'US,GS,+00001.23 g',   // Small unit (grams)
+                    'ST,GS,+00150.25 kg',
+                    'ST,GS,+00150.30 kg',
+                    'US,GS,+00149.80 kg',
+                    'US,GS,+00151.20 kg',
+                    'ST,GS,+00150.00 kg',
+                    'I',
+                    'ST,GS,+00000.00 kg',
+                    'US,GS,+00149.95 kg',
+                    'ST,GS,+00150.50 kg',
+                    'OL',
+                    'ST,GS,+00150.25 kg',
+                    '?'
                 ];
                 
                 this.setupEventListeners();
@@ -512,23 +387,15 @@
                 try {
                     this.hideError();
                     
-                    // Check if Web Serial API is supported
                     if (!('serial' in navigator)) {
                         throw new Error('Web Serial API not supported in this browser');
                     }
 
                     this.addToLog('Requesting serial port...');
-                    
-                    // Request a port
                     this.port = await navigator.serial.requestPort();
                     
-                    this.addToLog(`Port selected: ${this.port.getInfo ? JSON.stringify(this.port.getInfo()) : 'Unknown device'}`);
-                    
-                    // Get selected baud rate
                     const selectedBaudRate = parseInt(this.baudRateSelect.value);
-                    
-                    // Open the port with scale settings
-                    this.addToLog(`Opening serial port with settings: ${selectedBaudRate} baud, 7 data bits, even parity, 1 stop bit`);
+                    this.addToLog(`Opening serial port at ${selectedBaudRate} baud...`);
                     
                     await this.port.open({
                         baudRate: selectedBaudRate,
@@ -537,22 +404,19 @@
                         stopBits: 1
                     });
 
-                    // Set up streams
                     this.writer = this.port.writable.getWriter();
                     this.reader = this.port.readable.getReader();
-
                     this.lineBuffer = '';
-                    this.addToLog(`Connected to scale successfully at ${selectedBaudRate} baud`);
-                    this.updateStatus('Connected', 'connected');
                     
-                    // Clear chart when connecting
+                    this.addToLog(`Connected successfully`);
+                    this.updateStatus('Connected', 'connected');
                     this.chart.clear();
                     
                     this.connectBtn.disabled = true;
                     this.disconnectBtn.disabled = false;
                     this.startBtn.disabled = false;
                     this.testToggleBtn.disabled = true;
-                    this.baudRateSelect.disabled = true; // Disable baud rate selection when connected
+                    this.baudRateSelect.disabled = true;
 
                 } catch (error) {
                     const errorInfo = this.getDetailedErrorMessage(error);
@@ -560,12 +424,11 @@
                     this.showError(errorInfo.message, errorInfo.details);
                     this.updateStatus('Connection failed', 'disconnected');
                     
-                    // Clean up on error
                     if (this.port) {
                         try {
                             await this.port.close();
                         } catch (closeError) {
-                            console.log('Error closing port after failed connection:', closeError);
+                            console.log('Error closing port:', closeError);
                         }
                         this.port = null;
                     }
@@ -602,7 +465,7 @@
                     this.startBtn.disabled = true;
                     this.stopBtn.disabled = true;
                     this.testToggleBtn.disabled = false;
-                    this.baudRateSelect.disabled = false; // Re-enable baud rate selection
+                    this.baudRateSelect.disabled = false;
 
                 } catch (error) {
                     this.addToLog(`Disconnect error: ${error.message}`);
@@ -617,334 +480,35 @@
                     this.testToggleBtn.textContent = 'Disable Test Mode';
                     this.testToggleBtn.classList.add('active');
                     this.testInfo.style.display = 'block';
-                    this.addToLog('Test mode enabled - simulating scale data');
+                    this.addToLog('Test mode enabled');
                     this.updateStatus('Test Mode', 'test');
-                    
-                    // Clear chart when switching to test mode
                     this.chart.clear();
-                    
-                    // Enable start button in test mode
                     this.startBtn.disabled = false;
                     this.connectBtn.disabled = true;
-                    this.baudRateSelect.disabled = true; // Disable baud rate in test mode
+                    this.baudRateSelect.disabled = true;
                 } else {
                     this.testToggleBtn.textContent = 'Enable Test Mode';
                     this.testToggleBtn.classList.remove('active');
                     this.testInfo.style.display = 'none';
                     this.addToLog('Test mode disabled');
                     this.updateStatus('Disconnected', 'disconnected');
-                    
-                    // Reset button states
                     this.stopReading();
                     this.startBtn.disabled = true;
                     this.connectBtn.disabled = false;
-                    this.baudRateSelect.disabled = false; // Re-enable baud rate selection
-                }
-            }
-
-            generateTestResponse() {
-                const response = this.testResponses[this.testDataIndex];
-                this.testDataIndex = (this.testDataIndex + 1) % this.testResponses.length;
-                return response;
-            }
-
-            addToLog(message) {
-                const timestamp = new Date().toLocaleTimeString();
-                const logEntry = `[${timestamp}] ${message}`;
-                this.logDisplay.innerHTML += logEntry + '\n';
-                this.logDisplay.scrollTop = this.logDisplay.scrollHeight;
-                console.log(logEntry);
-            }
-
-            showError(message, details = '') {
-                this.errorInfo.innerHTML = `<strong>Error:</strong> ${message}${details ? '<br><br>' + details : ''}`;
-                this.errorInfo.style.display = 'block';
-            }
-
-            hideError() {
-                this.errorInfo.style.display = 'none';
-            }
-
-            updateStatus(message, className) {
-                this.status.textContent = message;
-                this.status.className = `status ${className}`;
-            }
-
-            updateWeightDisplay(weight, unit, status) {
-                if (weight !== null) {
-                    this.weightDisplay.textContent = `${weight} ${unit}`;
-                    // Add to chart
-                    this.chart.addDataPoint(weight, status);
-                    this.weightDisplay.className = `weight-display ${status}`;
-                } else {
-                    if (status === 'reading' || !status) {
-                        this.weightDisplay.textContent = 'No reading available';
-                        this.weightDisplay.className = 'weight-display no-reading';
-                    } else {
-                        this.weightDisplay.textContent = `${status.charAt(0).toUpperCase() + status.slice(1)}`;
-                        this.weightDisplay.className = `weight-display ${status}`;
-                    }
-                    // Add status-only point to chart
-                    this.chart.addDataPoint(null, status);
-                }
-            }
-
-            getDetailedErrorMessage(error) {
-                const errorMessage = error.message.toLowerCase();
-                
-                if (errorMessage.includes('failed to open serial port')) {
-                    return {
-                        message: 'Failed to open serial port',
-                        details: `
-                            <strong>Possible causes:</strong><br>
-                            • Another application is already using the port<br>
-                            • Insufficient permissions to access the device<br>
-                            • Device is not properly connected<br>
-                            • Wrong port settings (baudrate, parity, etc.)<br><br>
-                            
-                            <strong>Solutions:</strong><br>
-                            • Close any other software using the scale<br>
-                            • Try disconnecting and reconnecting the USB cable<br>
-                            • Check if the device appears in Device Manager/System Settings<br>
-                            • Restart the browser and try again
-                        `
-                    };
-                }
-                
-                if (errorMessage.includes('user aborted')) {
-                    return {
-                        message: 'Connection cancelled by user',
-                        details: 'You cancelled the port selection dialog.'
-                    };
-                }
-                
-                if (errorMessage.includes('no port selected')) {
-                    return {
-                        message: 'No serial port selected',
-                        details: 'Please select a valid serial port from the dialog.'
-                    };
-                }
-                
-                if (errorMessage.includes('access denied')) {
-                    return {
-                        message: 'Access denied to serial port',
-                        details: `
-                            <strong>Permission issue:</strong><br>
-                            • On Linux: Add your user to the 'dialout' group<br>
-                            • On Windows: Run browser as administrator<br>
-                            • Check antivirus software isn't blocking access
-                        `
-                    };
-                }
-                
-                // Generic error
-                return {
-                    message: 'Serial port connection failed',
-                    details: `
-                        <strong>Error details:</strong> ${error.message}<br><br>
-                        <strong>General troubleshooting:</strong><br>
-                        • Verify the scale is connected and powered on<br>
-                        • Check USB cable connections<br>
-                        • Try a different USB port<br>
-                        • Restart the scale and try again
-                    `
-                };
-            }
-
-            showSerialError(errorType, errorMessage, suggestions = []) {
-                const timestamp = new Date().toLocaleTimeString();
-                
-                // Throttle error messages to prevent spam
-                const now = Date.now();
-                if (now - this.lastErrorTime < this.errorThrottleMs) {
-                    this.errorCount++;
-                    return;
-                }
-                this.lastErrorTime = now;
-                
-                let detailedMessage = `<strong>Serial Communication Error (${errorType}):</strong> ${errorMessage}`;
-                
-                if (this.errorCount > 1) {
-                    detailedMessage += `<br><em>Error repeated ${this.errorCount} times in the last ${this.errorThrottleMs/1000} second(s)</em>`;
-                }
-                
-                detailedMessage += '<br><br><strong>Possible causes and solutions:</strong><ul>';
-                
-                // Add specific suggestions based on error type
-                suggestions.forEach(suggestion => {
-                    detailedMessage += `<li>${suggestion}</li>`;
-                });
-                
-                detailedMessage += '</ul>';
-                
-                this.addToLog(`[${timestamp}] Serial Error: ${errorType} - ${errorMessage} (Count: ${this.errorCount + 1})`);
-                this.showError(`Serial Communication Error (${errorType})`, detailedMessage);
-                
-                this.errorCount = 0; // Reset after displaying
-            }
-
-            getSerialErrorDetails(error) {
-                const errorMessage = error.message.toLowerCase();
-                
-                if (errorMessage.includes('parity error')) {
-                    return {
-                        type: 'Parity Error',
-                        message: 'Data transmission parity mismatch detected',
-                        suggestions: [
-                            'Check if the scale uses different parity settings (try None, Odd, or Even)',
-                            'Verify the baud rate matches the scale\'s configuration',
-                            'Check for electrical interference or poor cable connections',
-                            'Try a different USB cable or port',
-                            'Ensure the scale is properly grounded',
-                            'Some scales use 8 data bits with no parity instead of 7 bits with even parity'
-                        ]
-                    };
-                }
-                
-                if (errorMessage.includes('framing error')) {
-                    return {
-                        type: 'Framing Error',
-                        message: 'Invalid data frame structure received',
-                        suggestions: [
-                            'Check stop bit configuration (1 vs 2 stop bits)',
-                            'Verify baud rate settings match the scale',
-                            'Check for timing issues or clock drift',
-                            'Try a shorter, higher quality USB cable'
-                        ]
-                    };
-                }
-                
-                if (errorMessage.includes('overrun') || errorMessage.includes('buffer')) {
-                    return {
-                        type: 'Buffer Overrun',
-                        message: 'Data received faster than it can be processed',
-                        suggestions: [
-                            'System may be overloaded - close other applications',
-                            'Try a lower baud rate',
-                            'Check if the scale is sending data too frequently',
-                            'Restart the browser to clear any memory issues'
-                        ]
-                    };
-                }
-                
-                if (errorMessage.includes('timeout')) {
-                    return {
-                        type: 'Timeout Error',
-                        message: 'No response received from scale within expected time',
-                        suggestions: [
-                            'Check if the scale is powered on and responding',
-                            'Verify cable connections are secure',
-                            'Scale may be in sleep mode - activate it',
-                            'Try a different baud rate',
-                            'Check if another application is using the scale'
-                        ]
-                    };
-                }
-                
-                if (errorMessage.includes('device disconnected') || errorMessage.includes('stream ended')) {
-                    return {
-                        type: 'Connection Lost',
-                        message: 'Physical connection to scale was lost',
-                        suggestions: [
-                            'Check USB cable connections',
-                            'Try a different USB port',
-                            'Scale may have been powered off',
-                            'USB hub may have lost power',
-                            'Try reconnecting the scale'
-                        ]
-                    };
-                }
-                
-                // Generic error
-                return {
-                    type: 'Communication Error',
-                    message: error.message,
-                    suggestions: [
-                        'Check all cable connections',
-                        'Verify scale power and status',
-                        'Try different serial port settings',
-                        'Restart both the scale and computer',
-                        'Check for electromagnetic interference'
-                    ]
-                };
-            }
-
-            async readSingleWeight() {
-                if (this.testMode) {
-                    // Generate test response
-                    const response = this.generateTestResponse();
-                    this.addToLog(`Test response: ${JSON.stringify(response)}`);
-                    return this.parseWeightResponse(response);
-                }
-                
-                try {
-                    // Read raw data chunk
-                    const result = await Promise.race([
-                        this.reader.read(),
-                        new Promise((_, reject) => 
-                            setTimeout(() => reject(new Error('Timeout - no response from scale')), 2000)
-                        )
-                    ]);
-
-                    if (result.done) {
-                        throw new Error('Stream ended - device may be disconnected');
-                    }
-
-                    // Reset error count on successful read
-                    this.errorCount = 0;
-
-                    // Process the chunk and extract complete lines
-                    const lines = this.processDataChunk(result.value);
-                    
-                    // Return the most recent complete line
-                    if (lines.length > 0) {
-                        const response = lines[lines.length - 1];
-                        this.addToLog(`Raw response: ${JSON.stringify(response)}`);
-                        return this.parseWeightResponse(response);
-                    } else {
-                        // No complete line yet, continue reading
-                        return { weight: null, unit: null, status: 'reading' };
-                    }
-
-                } catch (error) {
-                    this.errorCount++;
-                    
-                    // Check if we've hit the maximum consecutive errors
-                    if (this.errorCount >= this.maxConsecutiveErrors) {
-                        const errorDetails = this.getSerialErrorDetails(error);
-                        this.showSerialError(errorDetails.type, errorDetails.message, errorDetails.suggestions);
-                        
-                        // Stop reading to prevent further error spam
-                        this.addToLog(`Stopping reading due to ${this.maxConsecutiveErrors} consecutive errors`);
-                        this.stopReading();
-                        return { weight: null, unit: null, status: 'error' };
-                    }
-                    
-                    // For occasional errors, just log briefly
-                    if (this.errorCount === 1 || this.errorCount % 5 === 0) {
-                        this.addToLog(`Read error (${this.errorCount}): ${error.message}`);
-                    }
-                    
-                    return { weight: null, unit: null, status: 'error' };
+                    this.baudRateSelect.disabled = false;
                 }
             }
 
             async startReading() {
-                if (this.isReading) {
-                    this.addToLog('Already reading...');
-                    return;
-                }
+                if (this.isReading) return;
 
-                // Reset error tracking when starting
                 this.errorCount = 0;
-                this.lastErrorTime = 0;
                 this.isReading = true;
                 
                 if (this.testMode) {
-                    this.addToLog('Starting test data simulation...');
+                    this.addToLog('Starting test simulation...');
                     this.updateStatus('Simulating...', 'reading');
                     
-                    // Use interval for test data
                     this.readingInterval = setInterval(async () => {
                         if (!this.isReading) return;
                         
@@ -961,16 +525,13 @@
                     this.addToLog('Starting continuous reading...');
                     this.updateStatus('Reading...', 'reading');
                     
-                    // Continuous reading loop for real data
                     const readContinuously = async () => {
                         while (this.isReading) {
                             try {
                                 const result = await this.readSingleWeight();
                                 
-                                // Stop reading if we've been stopped due to errors
                                 if (!this.isReading) break;
                                 
-                                // Only update display if we got actual weight data
                                 if (result.status !== 'reading') {
                                     this.updateWeightDisplay(result.weight, result.unit, result.status);
                                     
@@ -981,7 +542,6 @@
                                     }
                                 }
                                 
-                                // Small delay to prevent overwhelming the system
                                 await new Promise(resolve => setTimeout(resolve, 10));
                                 
                             } catch (error) {
@@ -1021,7 +581,6 @@
             }
 
             processDataChunk(chunk) {
-                // Decode the chunk and add to buffer
                 const decoder = new TextDecoder('ascii');
                 const text = decoder.decode(chunk, { stream: true });
                 this.lineBuffer += text;
@@ -1029,7 +588,6 @@
                 const lines = [];
                 let lineEnd;
                 
-                // Extract complete lines ending with \r\n
                 while ((lineEnd = this.lineBuffer.indexOf('\r\n')) !== -1) {
                     const line = this.lineBuffer.slice(0, lineEnd);
                     lines.push(line);
@@ -1094,27 +652,134 @@
                     return { weight: null, unit: null, status: 'error' };
                 }
             }
+
+            generateTestResponse() {
+                const response = this.testResponses[this.testDataIndex];
+                this.testDataIndex = (this.testDataIndex + 1) % this.testResponses.length;
+                return response;
+            }
+
+            async readSingleWeight() {
+                if (this.testMode) {
+                    const response = this.generateTestResponse();
+                    return this.parseWeightResponse(response);
+                }
+                
+                try {
+                    const result = await Promise.race([
+                        this.reader.read(),
+                        new Promise((_, reject) => 
+                            setTimeout(() => reject(new Error('Timeout')), 2000)
+                        )
+                    ]);
+
+                    if (result.done) {
+                        throw new Error('Stream ended');
+                    }
+
+                    this.errorCount = 0;
+                    const lines = this.processDataChunk(result.value);
+                    
+                    if (lines.length > 0) {
+                        const response = lines[lines.length - 1];
+                        return this.parseWeightResponse(response);
+                    } else {
+                        return { weight: null, unit: null, status: 'reading' };
+                    }
+
+                } catch (error) {
+                    this.errorCount++;
+                    
+                    if (this.errorCount >= this.maxConsecutiveErrors) {
+                        this.addToLog(`Stopping due to ${this.maxConsecutiveErrors} consecutive errors`);
+                        this.stopReading();
+                        return { weight: null, unit: null, status: 'error' };
+                    }
+                    
+                    if (this.errorCount === 1 || this.errorCount % 5 === 0) {
+                        this.addToLog(`Read error (${this.errorCount}): ${error.message}`);
+                    }
+                    
+                    return { weight: null, unit: null, status: 'error' };
+                }
+            }
+
+            updateWeightDisplay(weight, unit, status) {
+                const display = this.weightDisplay;
+                display.classList.remove('stable', 'unstable', 'overload', 'error', 'no-reading');
+                
+                if (weight !== null && !isNaN(weight)) {
+                    display.textContent = `${weight} ${unit}`;
+                    display.classList.add(status);
+                    this.chart.addDataPoint(weight, status);
+                } else {
+                    const statusMessages = {
+                        'unstable': 'UNSTABLE',
+                        'overload': 'OVERLOAD',
+                        'error': 'ERROR',
+                        'reading': 'READING...'
+                    };
+                    
+                    display.textContent = statusMessages[status] || 'NO DATA';
+                    display.classList.add(status === 'reading' ? 'no-reading' : status);
+                    this.chart.addDataPoint(null, status);
+                }
+            }
+
+            updateStatus(message, className) {
+                this.status.textContent = message;
+                this.status.className = `status ${className}`;
+            }
+
+            addToLog(message) {
+                const timestamp = new Date().toLocaleTimeString();
+                const logMessage = `[${timestamp}] ${message}`;
+                
+                this.logDisplay.textContent += logMessage + '\n';
+                this.logDisplay.scrollTop = this.logDisplay.scrollHeight;
+            }
+
+            showError(title, details) {
+                this.errorInfo.innerHTML = `<strong>${title}</strong><br>${details}`;
+                this.errorInfo.style.display = 'block';
+            }
+
+            hideError() {
+                this.errorInfo.style.display = 'none';
+            }
+
+            getDetailedErrorMessage(error) {
+                if (error.message.includes('No port selected')) {
+                    return {
+                        message: 'No serial port selected',
+                        details: 'Please select a serial port from the browser dialog.'
+                    };
+                }
+                
+                if (error.message.includes('Failed to open serial port')) {
+                    return {
+                        message: 'Failed to open serial port',
+                        details: 'Port may be in use by another application.'
+                    };
+                }
+                
+                if (error.message.includes('not supported')) {
+                    return {
+                        message: 'Web Serial API not supported',
+                        details: 'Use Chrome, Edge, or another Chromium-based browser.'
+                    };
+                }
+                
+                return {
+                    message: 'Connection error',
+                    details: error.message
+                };
+            }
         }
 
-        // Initialize the scale reader when page loads
         document.addEventListener('DOMContentLoaded', () => {
             new WebScaleReader();
         });
-
-        // Check for Web Serial API support
-        if (!('serial' in navigator)) {
-            document.body.innerHTML = `
-                <div class="container">
-                    <h1>Web Serial API Not Supported</h1>
-                    <p>This browser doesn't support the Web Serial API. Please use:</p>
-                    <ul>
-                        <li>Chrome/Edge 89+ with experimental features enabled</li>
-                        <li>Enable: <code>chrome://flags/#enable-experimental-web-platform-features</code></li>
-                        <li>Or use Firefox Nightly with <code>dom.serial.enabled</code> set to true</li>
-                    </ul>
-                </div>
-            `;
-        }
     </script>
 </body>
 </html>

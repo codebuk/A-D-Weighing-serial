@@ -6,6 +6,8 @@ import random
 import re
 import argparse
 import json
+import threading
+import queue
 
 # --- Args ---
 parser = argparse.ArgumentParser()
@@ -16,6 +18,10 @@ demo_mode = args.demo
 
 # --- Serial Setup ---
 ser = None
+serial_queue = queue.Queue()
+serial_thread = None
+serial_running = False
+
 if not demo_mode:
     try:
         ser = serial.Serial(
@@ -30,9 +36,42 @@ if not demo_mode:
     except Exception as e:
         print("Serial port unavailable:", e)
 
+def serial_reader_thread():
+    """Background thread to read serial data without blocking the event loop"""
+    global serial_running
+    while serial_running and ser:
+        try:
+            line = ser.readline().decode('ascii', errors='ignore')
+            if line.strip():
+                serial_queue.put(line.strip())
+        except serial.SerialException as e:
+            serial_queue.put(('ERROR', str(e)))
+            break
+        except Exception as e:
+            serial_queue.put(('ERROR', str(e)))
+            break
+
+def start_serial_reader():
+    """Start the serial reader thread"""
+    global serial_thread, serial_running
+    if ser and not serial_running:
+        serial_running = True
+        serial_thread = threading.Thread(target=serial_reader_thread, daemon=True)
+        serial_thread.start()
+        print("Serial reader thread started")
+
+def stop_serial_reader():
+    """Stop the serial reader thread"""
+    global serial_running
+    serial_running = False
+    if serial_thread:
+        serial_thread.join(timeout=2)
+        print("Serial reader thread stopped")
+
 # --- Parser ---
 def parse_scale_line(line):
     timestamp = datetime.datetime.now().isoformat()
+    raw_line = line.strip()  # Store the original raw line
     
     # Handle multiple possible formats
     patterns = [
@@ -49,21 +88,24 @@ def parse_scale_line(line):
             "status": "US",  # Unstable
             "weight": None,
             "unit": None,
-            "timestamp": timestamp
+            "timestamp": timestamp,
+            "raw": raw_line
         }
     elif line == 'OL':
         return {
             "status": "OL",  # Overload
             "weight": None,
             "unit": None,
-            "timestamp": timestamp
+            "timestamp": timestamp,
+            "raw": raw_line
         }
     elif line == '?':
         return {
             "status": "ERROR",
             "weight": None,
             "unit": None,
-            "timestamp": timestamp
+            "timestamp": timestamp,
+            "raw": raw_line
         }
     
     # Try to match weight patterns
@@ -74,7 +116,8 @@ def parse_scale_line(line):
                 "status": match.group(1),
                 "weight": float(match.group(2)),
                 "unit": match.group(3),
-                "timestamp": timestamp
+                "timestamp": timestamp,
+                "raw": raw_line
             }
     
     # If no pattern matches
@@ -84,42 +127,45 @@ def parse_scale_line(line):
         "weight": None,
         "unit": None,
         "timestamp": timestamp,
-        "raw": line
+        "raw": raw_line
     }
-
+    
 # --- Demo Generator ---
 demo_responses = [
-    ("ST", 26.456, "kg"),      # Stable weight
-    ("ST", 26.461, "kg"),      # Stable weight slight change
-    ("US", 26.425, "kg"),      # Unstable weight
-    ("US", 26.489, "kg"),      # Unstable weight
-    ("ST", 26.450, "kg"),      # Back to stable
-    ("US", None, None),        # Scale unstable (I response)
-    ("ST", 0.000, "kg"),       # Zero weight
-    ("US", 26.447, "kg"),      # Unstable near target
-    ("ST", 26.465, "kg"),      # Stable again
-    ("OL", None, None),        # Overload condition
-    ("ST", 26.452, "kg"),      # Back to normal
-    ("ERROR", None, None),     # Error condition
+    ("ST", 26.456, "kg", "ST,GS,+26.456 kg"),       # Stable weight
+    ("ST", 26.461, "kg", "ST,GS,+26.461 kg"),       # Stable weight slight change
+    ("US", 26.425, "kg", "US,GS,+26.425 kg"),       # Unstable weight
+    ("US", 26.489, "kg", "US,GS,+26.489 kg"),       # Unstable weight
+    ("ST", 26.450, "kg", "ST,GS,+26.450 kg"),       # Back to stable
+    ("US", None, None, "I"),                        # Scale unstable (I response)
+    ("ST", 0.000, "kg", "ST,GS,+0.000 kg"),         # Zero weight
+    ("US", 26.447, "kg", "US,GS,+26.447 kg"),       # Unstable near target
+    ("ST", 26.465, "kg", "ST,GS,+26.465 kg"),       # Stable again
+    ("OL", None, None, "OL"),                        # Overload condition
+    ("ST", 26.452, "kg", "ST,GS,+26.452 kg"),       # Back to normal
+    ("ERROR", None, None, "?"),                      # Error condition
 ]
 
 demo_index = 0
 
 def generate_demo_data():
     global demo_index
-    status, weight, unit = demo_responses[demo_index]
+    status, weight, unit, raw_str = demo_responses[demo_index]
     demo_index = (demo_index + 1) % len(demo_responses)
     
-    # Add small fluctuation to weight readings
+    # Add small fluctuation to weight readings and update raw string
     if weight is not None:
         fluctuation = random.uniform(-0.02, 0.02)
         weight = round(weight + fluctuation, 3)
+        # Update raw string with fluctuated weight
+        raw_str = f"{status},GS,{weight:+.3f} {unit}"
     
     return {
         "status": status,
         "weight": weight,
         "unit": unit,
-        "timestamp": datetime.datetime.now().isoformat()
+        "timestamp": datetime.datetime.now().isoformat(),
+        "raw": raw_str
     }
 
 # --- WebSocket Handler ---
@@ -127,41 +173,53 @@ async def handler(websocket):
     client_address = websocket.remote_address
     print(f"Client connected: {client_address}")
     
+    # Start serial reader if we have serial connection
+    if ser and not demo_mode:
+        start_serial_reader()
+    
     try:
         while True:
+            data = None
+            
             if demo_mode:
                 data = generate_demo_data()
                 # Add delay in demo mode to simulate real timing
                 await asyncio.sleep(1.0)
+                
             elif ser:
                 try:
-                    # Just read the continuous data stream - no query needed
-                    line = ser.readline().decode('ascii', errors='ignore')
-                    
-                    if line.strip():
-                        data = parse_scale_line(line)
-                        print(f"Received: {line.strip()} -> {data}")
-                    else:
-                        # Timeout occurred, but this is normal - just continue
+                    # Check for data from serial thread (non-blocking)
+                    try:
+                        line = serial_queue.get_nowait()
+                        if isinstance(line, tuple) and line[0] == 'ERROR':
+                            # Handle error from serial thread
+                            data = {
+                                "status": "ERROR",
+                                "weight": None,
+                                "unit": None,
+                                "timestamp": datetime.datetime.now().isoformat(),
+                                "error": line[1],
+                                "raw": ""
+                            }
+                        else:
+                            # Parse the line from serial
+                            data = parse_scale_line(line)
+                            print(f"Received: {line} -> Status: {data['status']}, Weight: {data.get('weight')}, Raw: {data['raw']}")
+                            
+                    except queue.Empty:
+                        # No data available, wait a bit and continue
+                        await asyncio.sleep(0.1)
                         continue
                         
-                except serial.SerialException as e:
-                    print(f"Serial error: {e}")
-                    data = {
-                        "status": "ERROR",
-                        "weight": None,
-                        "unit": None,
-                        "timestamp": datetime.datetime.now().isoformat(),
-                        "error": str(e)
-                    }
                 except Exception as e:
-                    print(f"Unexpected error reading serial: {e}")
+                    print(f"Unexpected error processing serial data: {e}")
                     data = {
                         "status": "ERROR",
                         "weight": None,
                         "unit": None,
                         "timestamp": datetime.datetime.now().isoformat(),
-                        "error": str(e)
+                        "error": str(e),
+                        "raw": ""
                     }
             else:
                 data = {
@@ -169,12 +227,13 @@ async def handler(websocket):
                     "weight": None,
                     "unit": None,
                     "timestamp": datetime.datetime.now().isoformat(),
-                    "error": "No serial connection available"
+                    "error": "No serial connection available",
+                    "raw": ""
                 }
                 await asyncio.sleep(1.0)  # Prevent busy loop when no serial
 
             # Send data to client (only when we have actual data)
-            if 'data' in locals():
+            if data:
                 try:
                     await websocket.send(json.dumps(data))
                 except websockets.exceptions.ConnectionClosed:
@@ -202,6 +261,7 @@ async def main():
     except Exception as e:
         print(f"Server error: {e}")
     finally:
+        stop_serial_reader()
         if ser:
             ser.close()
             print("Serial port closed")
