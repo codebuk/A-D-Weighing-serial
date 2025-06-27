@@ -16,6 +16,9 @@
             padding: 20px;
             border-radius: 8px;
         }
+        .display-container {
+            margin: 20px 0;
+        }
         button {
             padding: 10px 20px;
             margin: 5px;
@@ -61,13 +64,11 @@
             font-weight: bold;
             text-align: center;
             padding: 40px;
-            margin: 20px 0;
+            margin: 0 0 20px 0;
             border-radius: 12px;
             background: #e8f4fd;
             border: 3px solid #ccc;
             min-height: 200px;
-            width: 100%;
-            max-width: 1000px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -94,6 +95,34 @@
             border-color: #dc3545;
             font-size: 48px;
         }
+        .weight-display.no-reading {
+            font-size: 24px;
+            background: #e8f4fd;
+            color: #666;
+            border-color: #ccc;
+        }
+        .graph-container {
+            border: 3px solid #ccc;
+            border-radius: 12px;
+            background: #fff;
+            padding: 20px;
+            margin: 0;
+            min-height: 200px;
+            position: relative;
+        }
+        .graph-title {
+            font-size: 14px;
+            font-weight: bold;
+            text-align: center;
+            margin-bottom: 10px;
+            color: #333;
+        }
+        #weightChart {
+            width: 100%;
+            height: 250px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
         .error-info {
             background: #f8d7da;
             color: #721c24;
@@ -118,6 +147,11 @@
             margin: 10px 0;
             border-left: 4px solid #9c27b0;
         }
+        @media (max-width: 768px) {
+            .display-container {
+                margin: 10px 0;
+            }
+        }
     </style>
 </head>
 <body>
@@ -134,8 +168,15 @@
         
         <div id="status" class="status disconnected">Disconnected</div>
         
-        <div id="weightDisplay" class="weight-display">
-            No reading available
+        <div class="display-container">
+            <div id="weightDisplay" class="weight-display no-reading">
+                No reading available
+            </div>
+            
+            <div class="graph-container">
+                <div class="graph-title">Weight History</div>
+                <canvas id="weightChart"></canvas>
+            </div>
         </div>
         
         <div id="errorInfo" class="error-info" style="display: none;"></div>
@@ -161,6 +202,222 @@
     </div>
 
     <script>
+        class WeightChart {
+            constructor(canvasId) {
+                this.canvas = document.getElementById(canvasId);
+                this.ctx = this.canvas.getContext('2d');
+                this.data = [];
+                this.maxDataPoints = 100; // Keep last 100 readings
+                this.colors = {
+                    stable: '#28a745',
+                    unstable: '#ffc107', 
+                    overload: '#dc3545',
+                    error: '#dc3545'
+                };
+                
+                this.resizeCanvas();
+                window.addEventListener('resize', () => this.resizeCanvas());
+            }
+            
+            resizeCanvas() {
+                const container = this.canvas.parentElement;
+                const rect = container.getBoundingClientRect();
+                this.canvas.width = rect.width - 40; // Account for padding
+                this.canvas.height = 300;
+                this.redraw();
+            }
+            
+            addDataPoint(weight, status, timestamp) {
+                this.data.push({
+                    weight: weight,
+                    status: status,
+                    timestamp: timestamp || new Date()
+                });
+                
+                // Keep only the last maxDataPoints
+                if (this.data.length > this.maxDataPoints) {
+                    this.data.shift();
+                }
+                
+                this.redraw();
+            }
+            
+            redraw() {
+                if (this.data.length === 0) {
+                    this.drawEmpty();
+                    return;
+                }
+                
+                this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+                
+                // Fixed scale: 0 to 100kg
+                const minWeight = 0;
+                const maxWeight = 100;
+                const weightRange = maxWeight - minWeight;
+                
+                const padding = 40;
+                const chartWidth = this.canvas.width - 2 * padding;
+                const chartHeight = this.canvas.height - 2 * padding;
+                
+                // Draw axes
+                this.drawAxes(padding, chartWidth, chartHeight, minWeight, maxWeight);
+                
+                // Draw data points and lines
+                this.drawDataPoints(padding, chartWidth, chartHeight, minWeight, weightRange);
+            }
+            
+            drawAxes(padding, chartWidth, chartHeight, minWeight, maxWeight) {
+                this.ctx.strokeStyle = '#333';
+                this.ctx.lineWidth = 1;
+                
+                // Y-axis
+                this.ctx.beginPath();
+                this.ctx.moveTo(padding, padding);
+                this.ctx.lineTo(padding, padding + chartHeight);
+                this.ctx.stroke();
+                
+                // X-axis
+                this.ctx.beginPath();
+                this.ctx.moveTo(padding, padding + chartHeight);
+                this.ctx.lineTo(padding + chartWidth, padding + chartHeight);
+                this.ctx.stroke();
+                
+                // Y-axis labels - fixed 0-100kg scale
+                this.ctx.fillStyle = '#333';
+                this.ctx.font = '10px Arial';
+                this.ctx.textAlign = 'right';
+                
+                for (let i = 0; i <= 10; i++) {
+                    const y = padding + (chartHeight * i / 10);
+                    const weight = maxWeight - (i * 10); // 100, 90, 80, ... 10, 0
+                    this.ctx.fillText(`${weight}kg`, padding - 3, y + 2);
+                }
+                
+                // X-axis labels (time) - smaller font
+                this.ctx.textAlign = 'center';
+                this.ctx.font = '9px Arial';
+                for (let i = 0; i <= 4; i++) {
+                    const x = padding + (chartWidth * i / 4);
+                    const secondsAgo = (this.maxDataPoints * (4 - i) / 4);
+                    this.ctx.fillText(`-${Math.round(secondsAgo)}s`, x, padding + chartHeight + 12);
+                }
+                
+                // Add grid lines for better readability
+                this.ctx.strokeStyle = '#eee';
+                this.ctx.lineWidth = 0.5;
+                
+                // Horizontal grid lines (every 10kg)
+                for (let i = 1; i < 10; i++) {
+                    const y = padding + (chartHeight * i / 10);
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(padding, y);
+                    this.ctx.lineTo(padding + chartWidth, y);
+                    this.ctx.stroke();
+                }
+                
+                // Vertical grid lines
+                for (let i = 1; i < 4; i++) {
+                    const x = padding + (chartWidth * i / 4);
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(x, padding);
+                    this.ctx.lineTo(x, padding + chartHeight);
+                    this.ctx.stroke();
+                }
+            }
+            
+            drawDataPoints(padding, chartWidth, chartHeight, minWeight, weightRange) {
+                if (this.data.length < 2) return;
+                
+                const validData = this.data.filter(d => d.weight !== null);
+                if (validData.length < 2) return;
+                
+                // Draw connecting lines by status
+                const statusGroups = {};
+                validData.forEach((point, index) => {
+                    if (!statusGroups[point.status]) {
+                        statusGroups[point.status] = [];
+                    }
+                    const dataIndex = this.data.indexOf(point);
+                    
+                    // Clamp weight values to 0-100kg range for display
+                    const clampedWeight = Math.max(0, Math.min(100, point.weight));
+                    
+                    statusGroups[point.status].push({
+                        ...point,
+                        x: padding + (chartWidth * dataIndex / (this.data.length - 1)),
+                        y: padding + chartHeight - ((clampedWeight - minWeight) / weightRange) * chartHeight
+                    });
+                });
+                
+                // Draw lines for each status
+                Object.keys(statusGroups).forEach(status => {
+                    const points = statusGroups[status];
+                    if (points.length < 2) return;
+                    
+                    this.ctx.strokeStyle = this.colors[status] || '#666';
+                    this.ctx.lineWidth = 2;
+                    this.ctx.beginPath();
+                    
+                    points.forEach((point, index) => {
+                        if (index === 0) {
+                            this.ctx.moveTo(point.x, point.y);
+                        } else {
+                            this.ctx.lineTo(point.x, point.y);
+                        }
+                    });
+                    this.ctx.stroke();
+                });
+                
+                // Draw data points
+                validData.forEach((point, index) => {
+                    const dataIndex = this.data.indexOf(point);
+                    const x = padding + (chartWidth * dataIndex / (this.data.length - 1));
+                    
+                    // Clamp weight values to 0-100kg range for display
+                    const clampedWeight = Math.max(0, Math.min(100, point.weight));
+                    const y = padding + chartHeight - ((clampedWeight - minWeight) / weightRange) * chartHeight;
+                    
+                    this.ctx.fillStyle = this.colors[point.status] || '#666';
+                    this.ctx.beginPath();
+                    this.ctx.arc(x, y, 3, 0, 2 * Math.PI);
+                    this.ctx.fill();
+                    
+                    // Show warning indicator for out-of-range values
+                    if (point.weight > 100) {
+                        this.ctx.strokeStyle = '#ff0000';
+                        this.ctx.lineWidth = 2;
+                        this.ctx.beginPath();
+                        this.ctx.arc(x, padding + 5, 5, 0, 2 * Math.PI);
+                        this.ctx.stroke();
+                        
+                        // Add "!" symbol for overrange
+                        this.ctx.fillStyle = '#ff0000';
+                        this.ctx.font = 'bold 12px Arial';
+                        this.ctx.textAlign = 'center';
+                        this.ctx.fillText('!', x, padding + 9);
+                    }
+                });
+                
+                // Draw status indicators for non-weight points
+                this.data.forEach((point, index) => {
+                    if (point.weight === null) {
+                        const x = padding + (chartWidth * index / (this.data.length - 1));
+                        const y = padding + chartHeight + 25;
+                        
+                        this.ctx.fillStyle = this.colors[point.status] || '#666';
+                        this.ctx.beginPath();
+                        this.ctx.arc(x, y, 4, 0, 2 * Math.PI);
+                        this.ctx.fill();
+                    }
+                });
+            }
+            
+            clear() {
+                this.data = [];
+                this.redraw();
+            }
+        }
+
         class WebScaleReader {
             constructor() {
                 this.port = null;
@@ -182,6 +439,9 @@
                 this.weightDisplay = document.getElementById('weightDisplay');
                 this.errorInfo = document.getElementById('errorInfo');
                 this.testInfo = document.getElementById('testInfo');
+                
+                // Initialize chart
+                this.chart = new WeightChart('weightChart');
                 
                 // Test data responses covering all states
                 this.testResponses = [
@@ -227,6 +487,9 @@
                     this.testInfo.style.display = 'block';
                     this.addToLog('Test mode enabled - simulating scale data');
                     this.updateStatus('Test Mode', 'test');
+                    
+                    // Clear chart when switching to test mode
+                    this.chart.clear();
                     
                     // Enable start button in test mode
                     this.startBtn.disabled = false;
@@ -276,10 +539,20 @@
             updateWeightDisplay(weight, unit, status) {
                 if (weight !== null) {
                     this.weightDisplay.textContent = `${weight} ${unit}`;
+                    // Add to chart
+                    this.chart.addDataPoint(weight, status);
+                    this.weightDisplay.className = `weight-display ${status}`;
                 } else {
-                    this.weightDisplay.textContent = `${status.charAt(0).toUpperCase() + status.slice(1)}`;
+                    if (status === 'reading' || !status) {
+                        this.weightDisplay.textContent = 'No reading available';
+                        this.weightDisplay.className = 'weight-display no-reading';
+                    } else {
+                        this.weightDisplay.textContent = `${status.charAt(0).toUpperCase() + status.slice(1)}`;
+                        this.weightDisplay.className = `weight-display ${status}`;
+                    }
+                    // Add status-only point to chart
+                    this.chart.addDataPoint(null, status);
                 }
-                this.weightDisplay.className = `weight-display ${status}`;
             }
 
             getDetailedErrorMessage(error) {
@@ -382,6 +655,9 @@
                     this.lineBuffer = '';
                     this.addToLog('Connected to scale successfully');
                     this.updateStatus('Connected', 'connected');
+                    
+                    // Clear chart when connecting
+                    this.chart.clear();
                     
                     this.connectBtn.disabled = true;
                     this.disconnectBtn.disabled = false;
