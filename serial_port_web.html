@@ -242,6 +242,14 @@
                 this.redraw();
             }
             
+            drawEmpty() {
+                this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+                this.ctx.fillStyle = '#666';
+                this.ctx.font = '14px Arial';
+                this.ctx.textAlign = 'center';
+                this.ctx.fillText('No weight data available', this.canvas.width / 2, this.canvas.height / 2);
+            }
+            
             redraw() {
                 if (this.data.length === 0) {
                     this.drawEmpty();
