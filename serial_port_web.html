@@ -1019,6 +1019,81 @@
                 this.startBtn.disabled = false;
                 this.stopBtn.disabled = true;
             }
+
+            processDataChunk(chunk) {
+                // Decode the chunk and add to buffer
+                const decoder = new TextDecoder('ascii');
+                const text = decoder.decode(chunk, { stream: true });
+                this.lineBuffer += text;
+
+                const lines = [];
+                let lineEnd;
+                
+                // Extract complete lines ending with \r\n
+                while ((lineEnd = this.lineBuffer.indexOf('\r\n')) !== -1) {
+                    const line = this.lineBuffer.slice(0, lineEnd);
+                    lines.push(line);
+                    this.lineBuffer = this.lineBuffer.slice(lineEnd + 2);
+                }
+                
+                return lines;
+            }
+
+            parseWeightResponse(response) {
+                if (!response) {
+                    return { weight: null, unit: null, status: 'error' };
+                }
+
+                response = response.trim();
+
+                try {
+                    if (response.startsWith('ST')) {
+                        const parts = response.split(',');
+                        if (parts.length >= 2) {
+                            const weightPart = parts[2] || parts[1];
+                            if (weightPart && weightPart.includes(' ')) {
+                                const spaceIndex = weightPart.indexOf(' ');
+                                const weight = parseFloat(weightPart.substring(0, spaceIndex));
+                                const unit = weightPart.substring(spaceIndex + 1);
+                                return { weight, unit, status: 'stable' };
+                            }
+                        }
+                        return { weight: null, unit: null, status: 'error' };
+                    } 
+                    else if (response.startsWith('US')) {
+                        const parts = response.split(',');
+                        if (parts.length >= 2) {
+                            const weightPart = parts[2] || parts[1];
+                            if (weightPart && weightPart.includes(' ')) {
+                                const spaceIndex = weightPart.indexOf(' ');
+                                const weight = parseFloat(weightPart.substring(0, spaceIndex));
+                                const unit = weightPart.substring(spaceIndex + 1);
+                                return { weight, unit, status: 'unstable' };
+                            }
+                        }
+                        return { weight: null, unit: null, status: 'error' };
+                    }
+                    else if (response.startsWith('I')) {
+                        this.addToLog('Scale returns I (unstable)');
+                        return { weight: null, unit: null, status: 'unstable' };
+                    }
+                    else if (response.startsWith('?')) {
+                        this.addToLog('Invalid command');
+                        return { weight: null, unit: null, status: 'error' };
+                    }
+                    else if (response.startsWith('OL')) {
+                        this.addToLog('Overload condition');
+                        return { weight: null, unit: null, status: 'overload' };
+                    }
+                    else {
+                        this.addToLog(`Unknown response: ${response}`);
+                        return { weight: null, unit: null, status: 'error' };
+                    }
+                } catch (error) {
+                    this.addToLog(`Parse error: ${error.message}`);
+                    return { weight: null, unit: null, status: 'error' };
+                }
+            }
         }
 
         // Initialize the scale reader when page loads
