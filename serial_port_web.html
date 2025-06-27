@@ -164,6 +164,18 @@
             <button id="startBtn" class="start" disabled>Start Reading</button>
             <button id="stopBtn" class="stop" disabled>Stop Reading</button>
             <button id="testToggleBtn" class="test-toggle">Enable Test Mode</button>
+            
+            <div style="margin: 10px 0; display: inline-block;">
+                <label for="baudRateSelect" style="margin-right: 10px; font-weight: bold;">Baud Rate:</label>
+                <select id="baudRateSelect" style="padding: 8px; font-size: 14px; border-radius: 4px; border: 1px solid #ccc;">
+                    <option value="2400">2400</option>
+                    <option value="9600" selected>9600 (Default)</option>
+                    <option value="19200">19200</option>
+                    <option value="38400">38400</option>
+                    <option value="57600">57600</option>
+                    <option value="115200">115200</option>
+                </select>
+            </div>
         </div>
         
         <div id="status" class="status disconnected">Disconnected</div>
@@ -211,7 +223,7 @@
                 this.colors = {
                     stable: '#28a745',
                     unstable: '#ffc107', 
-                    overload: '#dc3545',
+                    overload: '#9c27b0',
                     error: '#dc3545'
                 };
                 
@@ -442,6 +454,7 @@
                 this.startBtn = document.getElementById('startBtn');
                 this.stopBtn = document.getElementById('stopBtn');
                 this.testToggleBtn = document.getElementById('testToggleBtn');
+                this.baudRateSelect = document.getElementById('baudRateSelect');
                 this.status = document.getElementById('status');
                 this.logDisplay = document.getElementById('logDisplay');
                 this.weightDisplay = document.getElementById('weightDisplay');
@@ -486,6 +499,113 @@
                 this.testToggleBtn.addEventListener('click', () => this.toggleTestMode());
             }
 
+            async connect() {
+                if (this.testMode) {
+                    this.addToLog('Cannot connect to real scale in test mode');
+                    return;
+                }
+                
+                try {
+                    this.hideError();
+                    
+                    // Check if Web Serial API is supported
+                    if (!('serial' in navigator)) {
+                        throw new Error('Web Serial API not supported in this browser');
+                    }
+
+                    this.addToLog('Requesting serial port...');
+                    
+                    // Request a port
+                    this.port = await navigator.serial.requestPort();
+                    
+                    this.addToLog(`Port selected: ${this.port.getInfo ? JSON.stringify(this.port.getInfo()) : 'Unknown device'}`);
+                    
+                    // Get selected baud rate
+                    const selectedBaudRate = parseInt(this.baudRateSelect.value);
+                    
+                    // Open the port with scale settings
+                    this.addToLog(`Opening serial port with settings: ${selectedBaudRate} baud, 7 data bits, even parity, 1 stop bit`);
+                    
+                    await this.port.open({
+                        baudRate: selectedBaudRate,
+                        dataBits: 7,
+                        parity: 'even',
+                        stopBits: 1
+                    });
+
+                    // Set up streams
+                    this.writer = this.port.writable.getWriter();
+                    this.reader = this.port.readable.getReader();
+
+                    this.lineBuffer = '';
+                    this.addToLog(`Connected to scale successfully at ${selectedBaudRate} baud`);
+                    this.updateStatus('Connected', 'connected');
+                    
+                    // Clear chart when connecting
+                    this.chart.clear();
+                    
+                    this.connectBtn.disabled = true;
+                    this.disconnectBtn.disabled = false;
+                    this.startBtn.disabled = false;
+                    this.testToggleBtn.disabled = true;
+                    this.baudRateSelect.disabled = true; // Disable baud rate selection when connected
+
+                } catch (error) {
+                    const errorInfo = this.getDetailedErrorMessage(error);
+                    this.addToLog(`Connection error: ${errorInfo.message}`);
+                    this.showError(errorInfo.message, errorInfo.details);
+                    this.updateStatus('Connection failed', 'disconnected');
+                    
+                    // Clean up on error
+                    if (this.port) {
+                        try {
+                            await this.port.close();
+                        } catch (closeError) {
+                            console.log('Error closing port after failed connection:', closeError);
+                        }
+                        this.port = null;
+                    }
+                }
+            }
+
+            async disconnect() {
+                try {
+                    this.hideError();
+                    this.stopReading();
+                    
+                    if (this.reader) {
+                        await this.reader.cancel();
+                        await this.reader.releaseLock();
+                        this.reader = null;
+                    }
+                    
+                    if (this.writer) {
+                        await this.writer.close();
+                        this.writer = null;
+                    }
+                    
+                    if (this.port) {
+                        await this.port.close();
+                        this.port = null;
+                    }
+
+                    this.addToLog('Disconnected from scale');
+                    this.updateStatus('Disconnected', 'disconnected');
+                    this.updateWeightDisplay(null, null, 'error');
+                    
+                    this.connectBtn.disabled = false;
+                    this.disconnectBtn.disabled = true;
+                    this.startBtn.disabled = true;
+                    this.stopBtn.disabled = true;
+                    this.testToggleBtn.disabled = false;
+                    this.baudRateSelect.disabled = false; // Re-enable baud rate selection
+
+                } catch (error) {
+                    this.addToLog(`Disconnect error: ${error.message}`);
+                    this.showError('Disconnect error', error.message);
+                }
+            }
+
             toggleTestMode() {
                 this.testMode = !this.testMode;
                 
@@ -502,6 +622,7 @@
                     // Enable start button in test mode
                     this.startBtn.disabled = false;
                     this.connectBtn.disabled = true;
+                    this.baudRateSelect.disabled = true; // Disable baud rate in test mode
                 } else {
                     this.testToggleBtn.textContent = 'Enable Test Mode';
                     this.testToggleBtn.classList.remove('active');
@@ -513,6 +634,7 @@
                     this.stopReading();
                     this.startBtn.disabled = true;
                     this.connectBtn.disabled = false;
+                    this.baudRateSelect.disabled = false; // Re-enable baud rate selection
                 }
             }
 
@@ -625,183 +747,6 @@
                 };
             }
 
-            async connect() {
-                if (this.testMode) {
-                    this.addToLog('Cannot connect to real scale in test mode');
-                    return;
-                }
-                
-                try {
-                    this.hideError();
-                    
-                    // Check if Web Serial API is supported
-                    if (!('serial' in navigator)) {
-                        throw new Error('Web Serial API not supported in this browser');
-                    }
-
-                    this.addToLog('Requesting serial port...');
-                    
-                    // Request a port
-                    this.port = await navigator.serial.requestPort();
-                    
-                    this.addToLog(`Port selected: ${this.port.getInfo ? JSON.stringify(this.port.getInfo()) : 'Unknown device'}`);
-                    
-                    // Open the port with scale settings
-                    this.addToLog('Opening serial port with settings: 9600 baud, 7 data bits, even parity, 1 stop bit');
-                    
-                    await this.port.open({
-                        baudRate: 9600,
-                        dataBits: 7,
-                        parity: 'even',
-                        stopBits: 1
-                    });
-
-                    // Set up streams
-                    this.writer = this.port.writable.getWriter();
-                    this.reader = this.port.readable.getReader();
-
-                    this.lineBuffer = '';
-                    this.addToLog('Connected to scale successfully');
-                    this.updateStatus('Connected', 'connected');
-                    
-                    // Clear chart when connecting
-                    this.chart.clear();
-                    
-                    this.connectBtn.disabled = true;
-                    this.disconnectBtn.disabled = false;
-                    this.startBtn.disabled = false;
-                    this.testToggleBtn.disabled = true;
-
-                } catch (error) {
-                    const errorInfo = this.getDetailedErrorMessage(error);
-                    this.addToLog(`Connection error: ${errorInfo.message}`);
-                    this.showError(errorInfo.message, errorInfo.details);
-                    this.updateStatus('Connection failed', 'disconnected');
-                    
-                    // Clean up on error
-                    if (this.port) {
-                        try {
-                            await this.port.close();
-                        } catch (closeError) {
-                            console.log('Error closing port after failed connection:', closeError);
-                        }
-                        this.port = null;
-                    }
-                }
-            }
-
-            async disconnect() {
-                try {
-                    this.hideError();
-                    this.stopReading();
-                    
-                    if (this.reader) {
-                        await this.reader.cancel();
-                        await this.reader.releaseLock();
-                        this.reader = null;
-                    }
-                    
-                    if (this.writer) {
-                        await this.writer.close();
-                        this.writer = null;
-                    }
-                    
-                    if (this.port) {
-                        await this.port.close();
-                        this.port = null;
-                    }
-
-                    this.addToLog('Disconnected from scale');
-                    this.updateStatus('Disconnected', 'disconnected');
-                    this.updateWeightDisplay(null, null, 'error');
-                    
-                    this.connectBtn.disabled = false;
-                    this.disconnectBtn.disabled = true;
-                    this.startBtn.disabled = true;
-                    this.stopBtn.disabled = true;
-                    this.testToggleBtn.disabled = false;
-
-                } catch (error) {
-                    this.addToLog(`Disconnect error: ${error.message}`);
-                    this.showError('Disconnect error', error.message);
-                }
-            }
-
-            parseWeightResponse(response) {
-                if (!response) {
-                    return { weight: null, unit: null, status: 'error' };
-                }
-
-                response = response.trim();
-
-                try {
-                    if (response.startsWith('ST')) {
-                        const parts = response.split(',');
-                        if (parts.length >= 2) {
-                            const weightPart = parts[2] || parts[1];
-                            if (weightPart && weightPart.includes(' ')) {
-                                const spaceIndex = weightPart.indexOf(' ');
-                                const weight = parseFloat(weightPart.substring(0, spaceIndex));
-                                const unit = weightPart.substring(spaceIndex + 1);
-                                return { weight, unit, status: 'stable' };
-                            }
-                        }
-                        return { weight: null, unit: null, status: 'error' };
-                    } 
-                    else if (response.startsWith('US')) {
-                        const parts = response.split(',');
-                        if (parts.length >= 2) {
-                            const weightPart = parts[2] || parts[1];
-                            if (weightPart && weightPart.includes(' ')) {
-                                const spaceIndex = weightPart.indexOf(' ');
-                                const weight = parseFloat(weightPart.substring(0, spaceIndex));
-                                const unit = weightPart.substring(spaceIndex + 1);
-                                return { weight, unit, status: 'unstable' };
-                            }
-                        }
-                        return { weight: null, unit: null, status: 'error' };
-                    }
-                    else if (response.startsWith('I')) {
-                        this.addToLog('Scale returns I (unstable)');
-                        return { weight: null, unit: null, status: 'unstable' };
-                    }
-                    else if (response.startsWith('?')) {
-                        this.addToLog('Invalid command');
-                        return { weight: null, unit: null, status: 'error' };
-                    }
-                    else if (response.startsWith('OL')) {
-                        this.addToLog('Overload condition');
-                        return { weight: null, unit: null, status: 'overload' };
-                    }
-                    else {
-                        this.addToLog(`Unknown response: ${response}`);
-                        return { weight: null, unit: null, status: 'error' };
-                    }
-                } catch (error) {
-                    this.addToLog(`Parse error: ${error.message}`);
-                    return { weight: null, unit: null, status: 'error' };
-                }
-            }
-
-            processDataChunk(chunk) {
-                // Decode the chunk and add to buffer
-                const decoder = new TextDecoder('ascii');
-                const text = decoder.decode(chunk, { stream: true });
-                this.lineBuffer += text;
-
-                const lines = [];
-                let lineEnd;
-                
-                // Extract complete lines ending with \r\n
-                while ((lineEnd = this.lineBuffer.indexOf('\r\n')) !== -1) {
-                    const line = this.lineBuffer.slice(0, lineEnd);
-                    lines.push(line);
-                    this.lineBuffer = this.lineBuffer.slice(lineEnd + 2);
-                }
-                
-                return lines;
-            }
-
             async readSingleWeight() {
                 if (this.testMode) {
                     // Generate test response
@@ -840,6 +785,25 @@
                     this.addToLog(`Read error: ${error.message}`);
                     return { weight: null, unit: null, status: 'error' };
                 }
+            }
+
+            processDataChunk(chunk) {
+                // Decode the chunk and add to buffer
+                const decoder = new TextDecoder('ascii');
+                const text = decoder.decode(chunk, { stream: true });
+                this.lineBuffer += text;
+
+                const lines = [];
+                let lineEnd;
+                
+                // Extract complete lines ending with \r\n
+                while ((lineEnd = this.lineBuffer.indexOf('\r\n')) !== -1) {
+                    const line = this.lineBuffer.slice(0, lineEnd);
+                    lines.push(line);
+                    this.lineBuffer = this.lineBuffer.slice(lineEnd + 2);
+                }
+                
+                return lines;
             }
 
             async startReading() {
