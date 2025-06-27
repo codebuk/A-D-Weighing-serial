@@ -1,0 +1,16 @@
+{
+  "name": "l8-scales",
+  "version": "1.0.0",
+  "description": "Scale reader for L8 scales",
+  "main": "serial_port_test.js",
+  "scripts": {
+    "start": "node serial_port_test.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "serialport": "^12.0.0"
+  },
+  "keywords": ["serial", "scale", "weight"],
+  "author": "",
+  "license": "ISC"
+}

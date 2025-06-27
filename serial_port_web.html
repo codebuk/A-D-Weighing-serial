@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scale Reader - Web Serial</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .container {
+            background: #f5f5f5;
+            padding: 20px;
+            border-radius: 8px;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            font-size: 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .connect { background: #4CAF50; color: white; }
+        .disconnect { background: #f44336; color: white; }
+        .start { background: #2196F3; color: white; }
+        .stop { background: #ff9800; color: white; }
+        .test-toggle { background: #9c27b0; color: white; }
+        .test-toggle.active { background: #673ab7; }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        .status.connected { background: #d4edda; color: #155724; }
+        .status.disconnected { background: #f8d7da; color: #721c24; }
+        .status.reading { background: #cce5ff; color: #004085; }
+        .status.test { background: #e1bee7; color: #4a148c; }
+        .log {
+            background: #000;
+            color: #0f0;
+            padding: 15px;
+            border-radius: 4px;
+            height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 14px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        .weight-display {
+            font-size: 216px;
+            font-weight: bold;
+            text-align: center;
+            padding: 40px;
+            margin: 20px 0;
+            border-radius: 12px;
+            background: #e8f4fd;
+            border: 3px solid #ccc;
+            min-height: 200px;
+            width: 100%;
+            max-width: 1000px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-shadow: 3px 3px 6px rgba(0,0,0,0.3);
+        }
+        .weight-display.stable { 
+            background: #d4edda; 
+            color: #155724; 
+            border-color: #28a745;
+        }
+        .weight-display.unstable { 
+            background: #fff3cd; 
+            color: #856404; 
+            border-color: #ffc107;
+        }
+        .weight-display.overload { 
+            background: #f8d7da; 
+            color: #721c24; 
+            border-color: #dc3545;
+        }
+        .weight-display.error { 
+            background: #f8d7da; 
+            color: #721c24; 
+            border-color: #dc3545;
+            font-size: 48px;
+        }
+        .error-info {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 10px 0;
+            border-left: 4px solid #dc3545;
+        }
+        .info {
+            background: #d1ecf1;
+            color: #0c5460;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 10px 0;
+            border-left: 4px solid #bee5eb;
+        }
+        .test-info {
+            background: #e1bee7;
+            color: #4a148c;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 10px 0;
+            border-left: 4px solid #9c27b0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Scale Reader - Web Serial API</h1>
+        
+        <div class="controls">
+            <button id="connectBtn" class="connect">Connect to Scale</button>
+            <button id="disconnectBtn" class="disconnect" disabled>Disconnect</button>
+            <button id="startBtn" class="start" disabled>Start Reading</button>
+            <button id="stopBtn" class="stop" disabled>Stop Reading</button>
+            <button id="testToggleBtn" class="test-toggle">Enable Test Mode</button>
+        </div>
+        
+        <div id="status" class="status disconnected">Disconnected</div>
+        
+        <div id="weightDisplay" class="weight-display">
+            No reading available
+        </div>
+        
+        <div id="errorInfo" class="error-info" style="display: none;"></div>
+        
+        <div id="testInfo" class="test-info" style="display: none;">
+            <strong>Test Mode Active:</strong> Simulating scale responses with all possible states (stable, unstable, overload, error)
+        </div>
+        
+        <div class="info">
+            <strong>Troubleshooting Connection Issues:</strong>
+            <ul>
+                <li>Make sure your scale is properly connected via USB</li>
+                <li>Check that no other applications are using the serial port</li>
+                <li>Try unplugging and reconnecting the USB cable</li>
+                <li>Verify the scale is powered on and responding</li>
+                <li>On Linux: Check if you have permissions to access /dev/ttyUSB* devices</li>
+                <li><strong>Testing:</strong> Use "Enable Test Mode" to test the interface without hardware</li>
+            </ul>
+        </div>
+        
+        <h3>Activity Log:</h3>
+        <div id="logDisplay" class="log"></div>
+    </div>
+
+    <script>
+        class WebScaleReader {
+            constructor() {
+                this.port = null;
+                this.reader = null;
+                this.writer = null;
+                this.isReading = false;
+                this.readingInterval = null;
+                this.lineBuffer = '';
+                this.testMode = false;
+                this.testDataIndex = 0;
+                
+                this.connectBtn = document.getElementById('connectBtn');
+                this.disconnectBtn = document.getElementById('disconnectBtn');
+                this.startBtn = document.getElementById('startBtn');
+                this.stopBtn = document.getElementById('stopBtn');
+                this.testToggleBtn = document.getElementById('testToggleBtn');
+                this.status = document.getElementById('status');
+                this.logDisplay = document.getElementById('logDisplay');
+                this.weightDisplay = document.getElementById('weightDisplay');
+                this.errorInfo = document.getElementById('errorInfo');
+                this.testInfo = document.getElementById('testInfo');
+                
+                // Test data responses covering all states
+                this.testResponses = [
+                    'ST,GS,+00150.25 kg',  // Stable weight
+                    'ST,GS,+00150.30 kg',  // Stable weight slight change
+                    'US,GS,+00149.80 kg',  // Unstable weight
+                    'US,GS,+00151.20 kg',  // Unstable weight
+                    'ST,GS,+00150.00 kg',  // Back to stable
+                    'I',                   // Scale unstable indicator
+                    'ST,GS,+00000.00 kg',  // Zero weight
+                    'US,GS,+00149.95 kg',  // Unstable near 150
+                    'ST,GS,+00150.50 kg',  // Stable again
+                    'OL',                  // Overload condition
+                    'ST,GS,+00150.25 kg',  // Back to normal
+                    '?',                   // Invalid command response
+                    'ST,GS,+00150.15 kg',  // Normal operation
+                    'US,GS,+02500.75 lb',  // Different unit (pounds)
+                    'ST,GS,+02500.00 lb',  // Stable pounds
+                    'UNKNOWN,DATA',        // Unknown response format
+                    'ST,GS,+00000.05 kg',  // Near zero
+                    'US,GS,+00000.01 kg',  // Unstable near zero
+                    'ST,GS,+00999.99 kg',  // Large weight
+                    'US,GS,+00001.23 g',   // Small unit (grams)
+                ];
+                
+                this.setupEventListeners();
+            }
+
+            setupEventListeners() {
+                this.connectBtn.addEventListener('click', () => this.connect());
+                this.disconnectBtn.addEventListener('click', () => this.disconnect());
+                this.startBtn.addEventListener('click', () => this.startReading());
+                this.stopBtn.addEventListener('click', () => this.stopReading());
+                this.testToggleBtn.addEventListener('click', () => this.toggleTestMode());
+            }
+
+            toggleTestMode() {
+                this.testMode = !this.testMode;
+                
+                if (this.testMode) {
+                    this.testToggleBtn.textContent = 'Disable Test Mode';
+                    this.testToggleBtn.classList.add('active');
+                    this.testInfo.style.display = 'block';
+                    this.addToLog('Test mode enabled - simulating scale data');
+                    this.updateStatus('Test Mode', 'test');
+                    
+                    // Enable start button in test mode
+                    this.startBtn.disabled = false;
+                    this.connectBtn.disabled = true;
+                } else {
+                    this.testToggleBtn.textContent = 'Enable Test Mode';
+                    this.testToggleBtn.classList.remove('active');
+                    this.testInfo.style.display = 'none';
+                    this.addToLog('Test mode disabled');
+                    this.updateStatus('Disconnected', 'disconnected');
+                    
+                    // Reset button states
+                    this.stopReading();
+                    this.startBtn.disabled = true;
+                    this.connectBtn.disabled = false;
+                }
+            }
+
+            generateTestResponse() {
+                const response = this.testResponses[this.testDataIndex];
+                this.testDataIndex = (this.testDataIndex + 1) % this.testResponses.length;
+                return response;
+            }
+
+            addToLog(message) {
+                const timestamp = new Date().toLocaleTimeString();
+                const logEntry = `[${timestamp}] ${message}`;
+                this.logDisplay.innerHTML += logEntry + '\n';
+                this.logDisplay.scrollTop = this.logDisplay.scrollHeight;
+                console.log(logEntry);
+            }
+
+            showError(message, details = '') {
+                this.errorInfo.innerHTML = `<strong>Error:</strong> ${message}${details ? '<br><br>' + details : ''}`;
+                this.errorInfo.style.display = 'block';
+            }
+
+            hideError() {
+                this.errorInfo.style.display = 'none';
+            }
+
+            updateStatus(message, className) {
+                this.status.textContent = message;
+                this.status.className = `status ${className}`;
+            }
+
+            updateWeightDisplay(weight, unit, status) {
+                if (weight !== null) {
+                    this.weightDisplay.textContent = `${weight} ${unit}`;
+                } else {
+                    this.weightDisplay.textContent = `${status.charAt(0).toUpperCase() + status.slice(1)}`;
+                }
+                this.weightDisplay.className = `weight-display ${status}`;
+            }
+
+            getDetailedErrorMessage(error) {
+                const errorMessage = error.message.toLowerCase();
+                
+                if (errorMessage.includes('failed to open serial port')) {
+                    return {
+                        message: 'Failed to open serial port',
+                        details: `
+                            <strong>Possible causes:</strong><br>
+                            • Another application is already using the port<br>
+                            • Insufficient permissions to access the device<br>
+                            • Device is not properly connected<br>
+                            • Wrong port settings (baudrate, parity, etc.)<br><br>
+                            
+                            <strong>Solutions:</strong><br>
+                            • Close any other software using the scale<br>
+                            • Try disconnecting and reconnecting the USB cable<br>
+                            • Check if the device appears in Device Manager/System Settings<br>
+                            • Restart the browser and try again
+                        `
+                    };
+                }
+                
+                if (errorMessage.includes('user aborted')) {
+                    return {
+                        message: 'Connection cancelled by user',
+                        details: 'You cancelled the port selection dialog.'
+                    };
+                }
+                
+                if (errorMessage.includes('no port selected')) {
+                    return {
+                        message: 'No serial port selected',
+                        details: 'Please select a valid serial port from the dialog.'
+                    };
+                }
+                
+                if (errorMessage.includes('access denied')) {
+                    return {
+                        message: 'Access denied to serial port',
+                        details: `
+                            <strong>Permission issue:</strong><br>
+                            • On Linux: Add your user to the 'dialout' group<br>
+                            • On Windows: Run browser as administrator<br>
+                            • Check antivirus software isn't blocking access
+                        `
+                    };
+                }
+                
+                // Generic error
+                return {
+                    message: 'Serial port connection failed',
+                    details: `
+                        <strong>Error details:</strong> ${error.message}<br><br>
+                        <strong>General troubleshooting:</strong><br>
+                        • Verify the scale is connected and powered on<br>
+                        • Check USB cable connections<br>
+                        • Try a different USB port<br>
+                        • Restart the scale and try again
+                    `
+                };
+            }
+
+            async connect() {
+                if (this.testMode) {
+                    this.addToLog('Cannot connect to real scale in test mode');
+                    return;
+                }
+                
+                try {
+                    this.hideError();
+                    
+                    // Check if Web Serial API is supported
+                    if (!('serial' in navigator)) {
+                        throw new Error('Web Serial API not supported in this browser');
+                    }
+
+                    this.addToLog('Requesting serial port...');
+                    
+                    // Request a port
+                    this.port = await navigator.serial.requestPort();
+                    
+                    this.addToLog(`Port selected: ${this.port.getInfo ? JSON.stringify(this.port.getInfo()) : 'Unknown device'}`);
+                    
+                    // Open the port with scale settings
+                    this.addToLog('Opening serial port with settings: 9600 baud, 7 data bits, even parity, 1 stop bit');
+                    
+                    await this.port.open({
+                        baudRate: 9600,
+                        dataBits: 7,
+                        parity: 'even',
+                        stopBits: 1
+                    });
+
+                    // Set up streams
+                    this.writer = this.port.writable.getWriter();
+                    this.reader = this.port.readable.getReader();
+
+                    this.lineBuffer = '';
+                    this.addToLog('Connected to scale successfully');
+                    this.updateStatus('Connected', 'connected');
+                    
+                    this.connectBtn.disabled = true;
+                    this.disconnectBtn.disabled = false;
+                    this.startBtn.disabled = false;
+                    this.testToggleBtn.disabled = true;
+
+                } catch (error) {
+                    const errorInfo = this.getDetailedErrorMessage(error);
+                    this.addToLog(`Connection error: ${errorInfo.message}`);
+                    this.showError(errorInfo.message, errorInfo.details);
+                    this.updateStatus('Connection failed', 'disconnected');
+                    
+                    // Clean up on error
+                    if (this.port) {
+                        try {
+                            await this.port.close();
+                        } catch (closeError) {
+                            console.log('Error closing port after failed connection:', closeError);
+                        }
+                        this.port = null;
+                    }
+                }
+            }
+
+            async disconnect() {
+                try {
+                    this.hideError();
+                    this.stopReading();
+                    
+                    if (this.reader) {
+                        await this.reader.cancel();
+                        await this.reader.releaseLock();
+                        this.reader = null;
+                    }
+                    
+                    if (this.writer) {
+                        await this.writer.close();
+                        this.writer = null;
+                    }
+                    
+                    if (this.port) {
+                        await this.port.close();
+                        this.port = null;
+                    }
+
+                    this.addToLog('Disconnected from scale');
+                    this.updateStatus('Disconnected', 'disconnected');
+                    this.updateWeightDisplay(null, null, 'error');
+                    
+                    this.connectBtn.disabled = false;
+                    this.disconnectBtn.disabled = true;
+                    this.startBtn.disabled = true;
+                    this.stopBtn.disabled = true;
+                    this.testToggleBtn.disabled = false;
+
+                } catch (error) {
+                    this.addToLog(`Disconnect error: ${error.message}`);
+                    this.showError('Disconnect error', error.message);
+                }
+            }
+
+            parseWeightResponse(response) {
+                if (!response) {
+                    return { weight: null, unit: null, status: 'error' };
+                }
+
+                response = response.trim();
+
+                try {
+                    if (response.startsWith('ST')) {
+                        const parts = response.split(',');
+                        if (parts.length >= 2) {
+                            const weightPart = parts[2] || parts[1];
+                            if (weightPart && weightPart.includes(' ')) {
+                                const spaceIndex = weightPart.indexOf(' ');
+                                const weight = parseFloat(weightPart.substring(0, spaceIndex));
+                                const unit = weightPart.substring(spaceIndex + 1);
+                                return { weight, unit, status: 'stable' };
+                            }
+                        }
+                        return { weight: null, unit: null, status: 'error' };
+                    } 
+                    else if (response.startsWith('US')) {
+                        const parts = response.split(',');
+                        if (parts.length >= 2) {
+                            const weightPart = parts[2] || parts[1];
+                            if (weightPart && weightPart.includes(' ')) {
+                                const spaceIndex = weightPart.indexOf(' ');
+                                const weight = parseFloat(weightPart.substring(0, spaceIndex));
+                                const unit = weightPart.substring(spaceIndex + 1);
+                                return { weight, unit, status: 'unstable' };
+                            }
+                        }
+                        return { weight: null, unit: null, status: 'error' };
+                    }
+                    else if (response.startsWith('I')) {
+                        this.addToLog('Scale returns I (unstable)');
+                        return { weight: null, unit: null, status: 'unstable' };
+                    }
+                    else if (response.startsWith('?')) {
+                        this.addToLog('Invalid command');
+                        return { weight: null, unit: null, status: 'error' };
+                    }
+                    else if (response.startsWith('OL')) {
+                        this.addToLog('Overload condition');
+                        return { weight: null, unit: null, status: 'overload' };
+                    }
+                    else {
+                        this.addToLog(`Unknown response: ${response}`);
+                        return { weight: null, unit: null, status: 'error' };
+                    }
+                } catch (error) {
+                    this.addToLog(`Parse error: ${error.message}`);
+                    return { weight: null, unit: null, status: 'error' };
+                }
+            }
+
+            processDataChunk(chunk) {
+                // Decode the chunk and add to buffer
+                const decoder = new TextDecoder('ascii');
+                const text = decoder.decode(chunk, { stream: true });
+                this.lineBuffer += text;
+
+                const lines = [];
+                let lineEnd;
+                
+                // Extract complete lines ending with \r\n
+                while ((lineEnd = this.lineBuffer.indexOf('\r\n')) !== -1) {
+                    const line = this.lineBuffer.slice(0, lineEnd);
+                    lines.push(line);
+                    this.lineBuffer = this.lineBuffer.slice(lineEnd + 2);
+                }
+                
+                return lines;
+            }
+
+            async readSingleWeight() {
+                if (this.testMode) {
+                    // Generate test response
+                    const response = this.generateTestResponse();
+                    this.addToLog(`Test response: ${JSON.stringify(response)}`);
+                    return this.parseWeightResponse(response);
+                }
+                
+                try {
+                    // Read raw data chunk
+                    const result = await Promise.race([
+                        this.reader.read(),
+                        new Promise((_, reject) => 
+                            setTimeout(() => reject(new Error('Timeout - no response from scale')), 2000)
+                        )
+                    ]);
+
+                    if (result.done) {
+                        throw new Error('Stream ended - device may be disconnected');
+                    }
+
+                    // Process the chunk and extract complete lines
+                    const lines = this.processDataChunk(result.value);
+                    
+                    // Return the most recent complete line
+                    if (lines.length > 0) {
+                        const response = lines[lines.length - 1];
+                        this.addToLog(`Raw response: ${JSON.stringify(response)}`);
+                        return this.parseWeightResponse(response);
+                    } else {
+                        // No complete line yet, continue reading
+                        return { weight: null, unit: null, status: 'reading' };
+                    }
+
+                } catch (error) {
+                    this.addToLog(`Read error: ${error.message}`);
+                    return { weight: null, unit: null, status: 'error' };
+                }
+            }
+
+            async startReading() {
+                if (this.isReading) {
+                    this.addToLog('Already reading...');
+                    return;
+                }
+
+                this.isReading = true;
+                
+                if (this.testMode) {
+                    this.addToLog('Starting test data simulation...');
+                    this.updateStatus('Simulating...', 'reading');
+                    
+                    // Use interval for test data
+                    this.readingInterval = setInterval(async () => {
+                        if (!this.isReading) return;
+                        
+                        const result = await this.readSingleWeight();
+                        this.updateWeightDisplay(result.weight, result.unit, result.status);
+                        
+                        if (result.weight !== null) {
+                            this.addToLog(`Weight: ${result.weight} ${result.unit} - Status: ${result.status}`);
+                        } else {
+                            this.addToLog(`Status: ${result.status}`);
+                        }
+                    }, 1000);
+                } else {
+                    this.addToLog('Starting continuous reading...');
+                    this.updateStatus('Reading...', 'reading');
+                    
+                    // Continuous reading loop for real data
+                    const readContinuously = async () => {
+                        while (this.isReading) {
+                            try {
+                                const result = await this.readSingleWeight();
+                                
+                                // Only update display if we got actual weight data
+                                if (result.status !== 'reading') {
+                                    this.updateWeightDisplay(result.weight, result.unit, result.status);
+                                    
+                                    if (result.weight !== null) {
+                                        this.addToLog(`Weight: ${result.weight} ${result.unit} - Status: ${result.status}`);
+                                    } else if (result.status !== 'reading') {
+                                        this.addToLog(`Status: ${result.status}`);
+                                    }
+                                }
+                            } catch (error) {
+                                this.addToLog(`Read loop error: ${error.message}`);
+                                break;
+                            }
+                        }
+                    };
+
+                    readContinuously();
+                }
+                
+                this.startBtn.disabled = true;
+                this.stopBtn.disabled = false;
+            }
+
+            async stopReading() {
+                if (!this.isReading) return;
+                
+                this.isReading = false;
+                
+                if (this.readingInterval) {
+                    clearInterval(this.readingInterval);
+                    this.readingInterval = null;
+                }
+                
+                this.addToLog('Stopped reading');
+                
+                if (this.testMode) {
+                    this.updateStatus('Test Mode', 'test');
+                } else {
+                    this.updateStatus('Connected (not reading)', 'connected');
+                }
+                
+                this.startBtn.disabled = false;
+                this.stopBtn.disabled = true;
+            }
+        }
+
+        // Initialize the scale reader when page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            new WebScaleReader();
+        });
+
+        // Check for Web Serial API support
+        if (!('serial' in navigator)) {
+            document.body.innerHTML = `
+                <div class="container">
+                    <h1>Web Serial API Not Supported</h1>
+                    <p>This browser doesn't support the Web Serial API. Please use:</p>
+                    <ul>
+                        <li>Chrome/Edge 89+ with experimental features enabled</li>
+                        <li>Enable: <code>chrome://flags/#enable-experimental-web-platform-features</code></li>
+                        <li>Or use Firefox Nightly with <code>dom.serial.enabled</code> set to true</li>
+                    </ul>
+                </div>
+            `;
+        }
+    </script>
+</body>
+</html>

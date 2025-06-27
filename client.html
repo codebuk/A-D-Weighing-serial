@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Scale Live Data</title>
+  <script>
+    let ws = new WebSocket("ws://localhost:8765");
+    ws.onmessage = (event) => {
+      document.getElementById("data").textContent = event.data;
+    };
+    ws.onopen = () => {
+      console.log("Connected to scale server");
+    };
+    ws.onerror = (err) => console.error("WebSocket error:", err);
+  </script>
+</head>
+<body>
+  <h1>Live Scale Reading</h1>
+  <pre id="data">Waiting for data...</pre>
+</body>
+</html>
