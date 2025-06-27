@@ -152,6 +152,13 @@
                 margin: 10px 0;
             }
         }
+        .preset { 
+            background: #607d8b; 
+            color: white; 
+            font-size: 12px;
+            padding: 6px 12px;
+            margin: 2px;
+        }
     </style>
 </head>
 <body>
@@ -165,16 +172,50 @@
             <button id="stopBtn" class="stop" disabled>Stop Reading</button>
             <button id="testToggleBtn" class="test-toggle">Enable Test Mode</button>
             
-            <div style="margin: 10px 0; display: inline-block;">
-                <label for="baudRateSelect" style="margin-right: 10px; font-weight: bold;">Baud Rate:</label>
-                <select id="baudRateSelect" style="padding: 8px; font-size: 14px; border-radius: 4px; border: 1px solid #ccc;">
-                    <option value="2400">2400</option>
-                    <option value="9600" selected>9600 (Default)</option>
-                    <option value="19200">19200</option>
-                    <option value="38400">38400</option>
-                    <option value="57600">57600</option>
-                    <option value="115200">115200</option>
-                </select>
+            <div style="margin: 10px 0; display: block;">
+                <div style="display: inline-block; margin-right: 20px;">
+                    <label for="baudRateSelect" style="margin-right: 10px; font-weight: bold;">Baud Rate:</label>
+                    <select id="baudRateSelect" style="padding: 8px; font-size: 14px; border-radius: 4px; border: 1px solid #ccc;">
+                        <option value="2400">2400</option>
+                        <option value="4800">4800</option>
+                        <option value="9600" selected>9600 (Default)</option>
+                        <option value="19200">19200</option>
+                        <option value="38400">38400</option>
+                        <option value="57600">57600</option>
+                        <option value="115200">115200</option>
+                    </select>
+                </div>
+                
+                <div style="display: inline-block; margin-right: 20px;">
+                    <label for="dataBitsSelect" style="margin-right: 10px; font-weight: bold;">Data Bits:</label>
+                    <select id="dataBitsSelect" style="padding: 8px; font-size: 14px; border-radius: 4px; border: 1px solid #ccc;">
+                        <option value="7" selected>7 (Scale Default)</option>
+                        <option value="8">8</option>
+                    </select>
+                </div>
+                
+                <div style="display: inline-block; margin-right: 20px;">
+                    <label for="paritySelect" style="margin-right: 10px; font-weight: bold;">Parity:</label>
+                    <select id="paritySelect" style="padding: 8px; font-size: 14px; border-radius: 4px; border: 1px solid #ccc;">
+                        <option value="none">None</option>
+                        <option value="even" selected>Even (Scale Default)</option>
+                        <option value="odd">Odd</option>
+                    </select>
+                </div>
+                
+                <div style="display: inline-block;">
+                    <label for="stopBitsSelect" style="margin-right: 10px; font-weight: bold;">Stop Bits:</label>
+                    <select id="stopBitsSelect" style="padding: 8px; font-size: 14px; border-radius: 4px; border: 1px solid #ccc;">
+                        <option value="1" selected>1 (Default)</option>
+                        <option value="2">2</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div style="margin: 10px 0; display: block;">
+                <button id="presetStandard" class="preset">Standard Scale (9600, 7, Even, 1)</button>
+                <button id="presetAlternate" class="preset">Alternate (9600, 8, None, 1)</button>
+                <button id="presetRS232" class="preset">RS232 (2400, 7, Even, 1)</button>
             </div>
         </div>
         
@@ -336,7 +377,7 @@
                 this.testMode = false;
                 this.testDataIndex = 0;
                 this.errorCount = 0;
-                this.maxConsecutiveErrors = 10;
+                this.maxConsecutiveErrors = 5; // Reduced from 10
                 
                 this.connectBtn = document.getElementById('connectBtn');
                 this.disconnectBtn = document.getElementById('disconnectBtn');
@@ -344,6 +385,12 @@
                 this.stopBtn = document.getElementById('stopBtn');
                 this.testToggleBtn = document.getElementById('testToggleBtn');
                 this.baudRateSelect = document.getElementById('baudRateSelect');
+                this.dataBitsSelect = document.getElementById('dataBitsSelect');
+                this.paritySelect = document.getElementById('paritySelect');
+                this.stopBitsSelect = document.getElementById('stopBitsSelect');
+                this.presetStandard = document.getElementById('presetStandard');
+                this.presetAlternate = document.getElementById('presetAlternate');
+                this.presetRS232 = document.getElementById('presetRS232');
                 this.status = document.getElementById('status');
                 this.logDisplay = document.getElementById('logDisplay');
                 this.weightDisplay = document.getElementById('weightDisplay');
@@ -376,6 +423,19 @@
                 this.startBtn.addEventListener('click', () => this.startReading());
                 this.stopBtn.addEventListener('click', () => this.stopReading());
                 this.testToggleBtn.addEventListener('click', () => this.toggleTestMode());
+                
+                // Preset buttons
+                this.presetStandard.addEventListener('click', () => this.setPreset(9600, 7, 'even', 1));
+                this.presetAlternate.addEventListener('click', () => this.setPreset(9600, 8, 'none', 1));
+                this.presetRS232.addEventListener('click', () => this.setPreset(2400, 7, 'even', 1));
+            }
+
+            setPreset(baud, dataBits, parity, stopBits) {
+                this.baudRateSelect.value = baud;
+                this.dataBitsSelect.value = dataBits;
+                this.paritySelect.value = parity;
+                this.stopBitsSelect.value = stopBits;
+                this.addToLog(`Preset applied: ${baud} baud, ${dataBits} data bits, ${parity} parity, ${stopBits} stop bit(s)`);
             }
 
             async connect() {
@@ -394,14 +454,19 @@
                     this.addToLog('Requesting serial port...');
                     this.port = await navigator.serial.requestPort();
                     
+                    // Get all selected settings
                     const selectedBaudRate = parseInt(this.baudRateSelect.value);
-                    this.addToLog(`Opening serial port at ${selectedBaudRate} baud...`);
+                    const selectedDataBits = parseInt(this.dataBitsSelect.value);
+                    const selectedParity = this.paritySelect.value;
+                    const selectedStopBits = parseInt(this.stopBitsSelect.value);
+                    
+                    this.addToLog(`Opening serial port with: ${selectedBaudRate} baud, ${selectedDataBits} data bits, ${selectedParity} parity, ${selectedStopBits} stop bit(s)`);
                     
                     await this.port.open({
                         baudRate: selectedBaudRate,
-                        dataBits: 7,
-                        parity: 'even',
-                        stopBits: 1
+                        dataBits: selectedDataBits,
+                        parity: selectedParity,
+                        stopBits: selectedStopBits
                     });
 
                     this.writer = this.port.writable.getWriter();
@@ -417,6 +482,12 @@
                     this.startBtn.disabled = false;
                     this.testToggleBtn.disabled = true;
                     this.baudRateSelect.disabled = true;
+                    this.dataBitsSelect.disabled = true;
+                    this.paritySelect.disabled = true;
+                    this.stopBitsSelect.disabled = true;
+                    this.presetStandard.disabled = true;
+                    this.presetAlternate.disabled = true;
+                    this.presetRS232.disabled = true;
 
                 } catch (error) {
                     const errorInfo = this.getDetailedErrorMessage(error);
@@ -466,6 +537,12 @@
                     this.stopBtn.disabled = true;
                     this.testToggleBtn.disabled = false;
                     this.baudRateSelect.disabled = false;
+                    this.dataBitsSelect.disabled = false;
+                    this.paritySelect.disabled = false;
+                    this.stopBitsSelect.disabled = false;
+                    this.presetStandard.disabled = false;
+                    this.presetAlternate.disabled = false;
+                    this.presetRS232.disabled = false;
 
                 } catch (error) {
                     this.addToLog(`Disconnect error: ${error.message}`);
@@ -486,6 +563,12 @@
                     this.startBtn.disabled = false;
                     this.connectBtn.disabled = true;
                     this.baudRateSelect.disabled = true;
+                    this.dataBitsSelect.disabled = true;
+                    this.paritySelect.disabled = true;
+                    this.stopBitsSelect.disabled = true;
+                    this.presetStandard.disabled = true;
+                    this.presetAlternate.disabled = true;
+                    this.presetRS232.disabled = true;
                 } else {
                     this.testToggleBtn.textContent = 'Enable Test Mode';
                     this.testToggleBtn.classList.remove('active');
@@ -496,7 +579,102 @@
                     this.startBtn.disabled = true;
                     this.connectBtn.disabled = false;
                     this.baudRateSelect.disabled = false;
+                    this.dataBitsSelect.disabled = false;
+                    this.paritySelect.disabled = false;
+                    this.stopBitsSelect.disabled = false;
+                    this.presetStandard.disabled = false;
+                    this.presetAlternate.disabled = false;
+                    this.presetRS232.disabled = false;
                 }
+            }
+
+            async readSingleWeight() {
+                if (this.testMode) {
+                    const response = this.generateTestResponse();
+                    return this.parseWeightResponse(response);
+                }
+                
+                try {
+                    const result = await Promise.race([
+                        this.reader.read(),
+                        new Promise((_, reject) => 
+                            setTimeout(() => reject(new Error('Timeout - no data received')), 3000) // Increased timeout
+                        )
+                    ]);
+
+                    if (result.done) {
+                        throw new Error('Stream ended - device disconnected');
+                    }
+
+                    this.errorCount = 0; // Reset error count on successful read
+                    const lines = this.processDataChunk(result.value);
+                    
+                    if (lines.length > 0) {
+                        const response = lines[lines.length - 1];
+                        this.addToLog(`Raw data: "${response}"`); // Log raw data for debugging
+                        return this.parseWeightResponse(response);
+                    } else {
+                        return { weight: null, unit: null, status: 'reading' };
+                    }
+
+                } catch (error) {
+                    this.errorCount++;
+                    
+                    // More detailed error reporting
+                    if (error.message.includes('Parity error')) {
+                        if (this.errorCount === 1) {
+                            this.addToLog(`Parity error detected - check serial settings (currently: ${this.dataBitsSelect.value} data bits, ${this.paritySelect.value} parity)`);
+                            this.showError('Serial Configuration Error', 
+                                'Parity error detected. Try different settings:\n' +
+                                '• Standard Scale: 9600 baud, 7 data bits, Even parity, 1 stop bit\n' +
+                                '• Alternative: 9600 baud, 8 data bits, No parity, 1 stop bit\n' +
+                                '• RS232: 2400 baud, 7 data bits, Even parity, 1 stop bit'
+                            );
+                        }
+                    } else if (error.message.includes('Timeout')) {
+                        if (this.errorCount === 1) {
+                            this.addToLog('Timeout - scale may not be sending data. Check scale power and connection.');
+                        }
+                    } else {
+                        this.addToLog(`Read error (${this.errorCount}): ${error.message}`);
+                    }
+                    
+                    if (this.errorCount >= this.maxConsecutiveErrors) {
+                        this.addToLog(`Stopping due to ${this.maxConsecutiveErrors} consecutive errors. Try different serial settings.`);
+                        this.stopReading();
+                        return { weight: null, unit: null, status: 'error' };
+                    }
+                    
+                    return { weight: null, unit: null, status: 'error' };
+                }
+            }
+
+            getDetailedErrorMessage(error) {
+                if (error.message.includes('No port selected')) {
+                    return {
+                        message: 'No serial port selected',
+                        details: 'Please select a serial port from the browser dialog.'
+                    };
+                }
+                
+                if (error.message.includes('Failed to open serial port')) {
+                    return {
+                        message: 'Failed to open serial port',
+                        details: 'Port may be in use by another application or the settings are incorrect.'
+                    };
+                }
+                
+                if (error.message.includes('not supported')) {
+                    return {
+                        message: 'Web Serial API not supported',
+                        details: 'Use Chrome, Edge, or another Chromium-based browser.'
+                    };
+                }
+                
+                return {
+                    message: 'Connection error',
+                    details: error.message
+                };
             }
 
             async startReading() {
@@ -659,51 +837,6 @@
                 return response;
             }
 
-            async readSingleWeight() {
-                if (this.testMode) {
-                    const response = this.generateTestResponse();
-                    return this.parseWeightResponse(response);
-                }
-                
-                try {
-                    const result = await Promise.race([
-                        this.reader.read(),
-                        new Promise((_, reject) => 
-                            setTimeout(() => reject(new Error('Timeout')), 2000)
-                        )
-                    ]);
-
-                    if (result.done) {
-                        throw new Error('Stream ended');
-                    }
-
-                    this.errorCount = 0;
-                    const lines = this.processDataChunk(result.value);
-                    
-                    if (lines.length > 0) {
-                        const response = lines[lines.length - 1];
-                        return this.parseWeightResponse(response);
-                    } else {
-                        return { weight: null, unit: null, status: 'reading' };
-                    }
-
-                } catch (error) {
-                    this.errorCount++;
-                    
-                    if (this.errorCount >= this.maxConsecutiveErrors) {
-                        this.addToLog(`Stopping due to ${this.maxConsecutiveErrors} consecutive errors`);
-                        this.stopReading();
-                        return { weight: null, unit: null, status: 'error' };
-                    }
-                    
-                    if (this.errorCount === 1 || this.errorCount % 5 === 0) {
-                        this.addToLog(`Read error (${this.errorCount}): ${error.message}`);
-                    }
-                    
-                    return { weight: null, unit: null, status: 'error' };
-                }
-            }
-
             updateWeightDisplay(weight, unit, status) {
                 const display = this.weightDisplay;
                 display.classList.remove('stable', 'unstable', 'overload', 'error', 'no-reading');
@@ -746,34 +879,6 @@
 
             hideError() {
                 this.errorInfo.style.display = 'none';
-            }
-
-            getDetailedErrorMessage(error) {
-                if (error.message.includes('No port selected')) {
-                    return {
-                        message: 'No serial port selected',
-                        details: 'Please select a serial port from the browser dialog.'
-                    };
-                }
-                
-                if (error.message.includes('Failed to open serial port')) {
-                    return {
-                        message: 'Failed to open serial port',
-                        details: 'Port may be in use by another application.'
-                    };
-                }
-                
-                if (error.message.includes('not supported')) {
-                    return {
-                        message: 'Web Serial API not supported',
-                        details: 'Use Chrome, Edge, or another Chromium-based browser.'
-                    };
-                }
-                
-                return {
-                    message: 'Connection error',
-                    details: error.message
-                };
             }
         }
 
