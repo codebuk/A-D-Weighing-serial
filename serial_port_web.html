@@ -185,37 +185,6 @@
                         <option value="115200">115200</option>
                     </select>
                 </div>
-                
-                <div style="display: inline-block; margin-right: 20px;">
-                    <label for="dataBitsSelect" style="margin-right: 10px; font-weight: bold;">Data Bits:</label>
-                    <select id="dataBitsSelect" style="padding: 8px; font-size: 14px; border-radius: 4px; border: 1px solid #ccc;">
-                        <option value="7" selected>7 (Scale Default)</option>
-                        <option value="8">8</option>
-                    </select>
-                </div>
-                
-                <div style="display: inline-block; margin-right: 20px;">
-                    <label for="paritySelect" style="margin-right: 10px; font-weight: bold;">Parity:</label>
-                    <select id="paritySelect" style="padding: 8px; font-size: 14px; border-radius: 4px; border: 1px solid #ccc;">
-                        <option value="none">None</option>
-                        <option value="even" selected>Even (Scale Default)</option>
-                        <option value="odd">Odd</option>
-                    </select>
-                </div>
-                
-                <div style="display: inline-block;">
-                    <label for="stopBitsSelect" style="margin-right: 10px; font-weight: bold;">Stop Bits:</label>
-                    <select id="stopBitsSelect" style="padding: 8px; font-size: 14px; border-radius: 4px; border: 1px solid #ccc;">
-                        <option value="1" selected>1 (Default)</option>
-                        <option value="2">2</option>
-                    </select>
-                </div>
-            </div>
-            
-            <div style="margin: 10px 0; display: block;">
-                <button id="presetStandard" class="preset">Standard Scale (9600, 7, Even, 1)</button>
-                <button id="presetAlternate" class="preset">Alternate (9600, 8, None, 1)</button>
-                <button id="presetRS232" class="preset">RS232 (2400, 7, Even, 1)</button>
             </div>
         </div>
         
@@ -377,7 +346,7 @@
                 this.testMode = false;
                 this.testDataIndex = 0;
                 this.errorCount = 0;
-                this.maxConsecutiveErrors = 5; // Reduced from 10
+                this.maxConsecutiveErrors = 5;
                 
                 this.connectBtn = document.getElementById('connectBtn');
                 this.disconnectBtn = document.getElementById('disconnectBtn');
@@ -385,12 +354,6 @@
                 this.stopBtn = document.getElementById('stopBtn');
                 this.testToggleBtn = document.getElementById('testToggleBtn');
                 this.baudRateSelect = document.getElementById('baudRateSelect');
-                this.dataBitsSelect = document.getElementById('dataBitsSelect');
-                this.paritySelect = document.getElementById('paritySelect');
-                this.stopBitsSelect = document.getElementById('stopBitsSelect');
-                this.presetStandard = document.getElementById('presetStandard');
-                this.presetAlternate = document.getElementById('presetAlternate');
-                this.presetRS232 = document.getElementById('presetRS232');
                 this.status = document.getElementById('status');
                 this.logDisplay = document.getElementById('logDisplay');
                 this.weightDisplay = document.getElementById('weightDisplay');
@@ -423,19 +386,6 @@
                 this.startBtn.addEventListener('click', () => this.startReading());
                 this.stopBtn.addEventListener('click', () => this.stopReading());
                 this.testToggleBtn.addEventListener('click', () => this.toggleTestMode());
-                
-                // Preset buttons
-                this.presetStandard.addEventListener('click', () => this.setPreset(9600, 7, 'even', 1));
-                this.presetAlternate.addEventListener('click', () => this.setPreset(9600, 8, 'none', 1));
-                this.presetRS232.addEventListener('click', () => this.setPreset(2400, 7, 'even', 1));
-            }
-
-            setPreset(baud, dataBits, parity, stopBits) {
-                this.baudRateSelect.value = baud;
-                this.dataBitsSelect.value = dataBits;
-                this.paritySelect.value = parity;
-                this.stopBitsSelect.value = stopBits;
-                this.addToLog(`Preset applied: ${baud} baud, ${dataBits} data bits, ${parity} parity, ${stopBits} stop bit(s)`);
             }
 
             async connect() {
@@ -454,19 +404,15 @@
                     this.addToLog('Requesting serial port...');
                     this.port = await navigator.serial.requestPort();
                     
-                    // Get all selected settings
                     const selectedBaudRate = parseInt(this.baudRateSelect.value);
-                    const selectedDataBits = parseInt(this.dataBitsSelect.value);
-                    const selectedParity = this.paritySelect.value;
-                    const selectedStopBits = parseInt(this.stopBitsSelect.value);
                     
-                    this.addToLog(`Opening serial port with: ${selectedBaudRate} baud, ${selectedDataBits} data bits, ${selectedParity} parity, ${selectedStopBits} stop bit(s)`);
+                    this.addToLog(`Opening serial port at ${selectedBaudRate} baud (7 data bits, even parity, 1 stop bit)`);
                     
                     await this.port.open({
                         baudRate: selectedBaudRate,
-                        dataBits: selectedDataBits,
-                        parity: selectedParity,
-                        stopBits: selectedStopBits
+                        dataBits: 7,
+                        parity: 'even',
+                        stopBits: 1
                     });
 
                     this.writer = this.port.writable.getWriter();
@@ -482,12 +428,6 @@
                     this.startBtn.disabled = false;
                     this.testToggleBtn.disabled = true;
                     this.baudRateSelect.disabled = true;
-                    this.dataBitsSelect.disabled = true;
-                    this.paritySelect.disabled = true;
-                    this.stopBitsSelect.disabled = true;
-                    this.presetStandard.disabled = true;
-                    this.presetAlternate.disabled = true;
-                    this.presetRS232.disabled = true;
 
                 } catch (error) {
                     const errorInfo = this.getDetailedErrorMessage(error);
@@ -509,27 +449,45 @@
             async disconnect() {
                 try {
                     this.hideError();
+                    
                     this.stopReading();
+                    await new Promise(resolve => setTimeout(resolve, 100));
                     
                     if (this.reader) {
-                        await this.reader.cancel();
-                        await this.reader.releaseLock();
+                        try {
+                            await this.reader.cancel();
+                        } catch (cancelError) {
+                            console.log('Reader cancel error (ignored):', cancelError);
+                        }
+                        try {
+                            await this.reader.releaseLock();
+                        } catch (releaseError) {
+                            console.log('Reader release error (ignored):', releaseError);
+                        }
                         this.reader = null;
                     }
                     
                     if (this.writer) {
-                        await this.writer.close();
+                        try {
+                            await this.writer.close();
+                        } catch (writerError) {
+                            console.log('Writer close error (ignored):', writerError);
+                        }
                         this.writer = null;
                     }
                     
                     if (this.port) {
-                        await this.port.close();
+                        try {
+                            await this.port.close();
+                        } catch (portError) {
+                            console.log('Port close error (ignored):', portError);
+                        }
                         this.port = null;
                     }
 
                     this.addToLog('Disconnected from scale');
                     this.updateStatus('Disconnected', 'disconnected');
-                    this.updateWeightDisplay(null, null, 'error');
+                    this.updateWeightDisplay(null, null, 'no-reading');
                     
                     this.connectBtn.disabled = false;
                     this.disconnectBtn.disabled = true;
@@ -537,16 +495,17 @@
                     this.stopBtn.disabled = true;
                     this.testToggleBtn.disabled = false;
                     this.baudRateSelect.disabled = false;
-                    this.dataBitsSelect.disabled = false;
-                    this.paritySelect.disabled = false;
-                    this.stopBitsSelect.disabled = false;
-                    this.presetStandard.disabled = false;
-                    this.presetAlternate.disabled = false;
-                    this.presetRS232.disabled = false;
 
                 } catch (error) {
-                    this.addToLog(`Disconnect error: ${error.message}`);
-                    this.showError('Disconnect error', error.message);
+                    if (!error.message.includes('Parity error')) {
+                        this.addToLog(`Disconnect error: ${error.message}`);
+                        this.showError('Disconnect error', error.message);
+                    } else {
+                        console.log('Parity error during disconnect (ignored):', error);
+                        this.addToLog('Disconnected (with communication errors)');
+                        this.updateStatus('Disconnected', 'disconnected');
+                        this.updateWeightDisplay(null, null, 'no-reading');
+                    }
                 }
             }
 
@@ -563,12 +522,6 @@
                     this.startBtn.disabled = false;
                     this.connectBtn.disabled = true;
                     this.baudRateSelect.disabled = true;
-                    this.dataBitsSelect.disabled = true;
-                    this.paritySelect.disabled = true;
-                    this.stopBitsSelect.disabled = true;
-                    this.presetStandard.disabled = true;
-                    this.presetAlternate.disabled = true;
-                    this.presetRS232.disabled = true;
                 } else {
                     this.testToggleBtn.textContent = 'Enable Test Mode';
                     this.testToggleBtn.classList.remove('active');
@@ -579,12 +532,6 @@
                     this.startBtn.disabled = true;
                     this.connectBtn.disabled = false;
                     this.baudRateSelect.disabled = false;
-                    this.dataBitsSelect.disabled = false;
-                    this.paritySelect.disabled = false;
-                    this.stopBitsSelect.disabled = false;
-                    this.presetStandard.disabled = false;
-                    this.presetAlternate.disabled = false;
-                    this.presetRS232.disabled = false;
                 }
             }
 
@@ -594,53 +541,64 @@
                     return this.parseWeightResponse(response);
                 }
                 
+                if (!this.isReading) {
+                    return { weight: null, unit: null, status: 'stopped' };
+                }
+                
                 try {
                     const result = await Promise.race([
                         this.reader.read(),
                         new Promise((_, reject) => 
-                            setTimeout(() => reject(new Error('Timeout - no data received')), 3000) // Increased timeout
+                            setTimeout(() => reject(new Error('Timeout - no data received')), 2000)
                         )
                     ]);
+
+                    if (!this.isReading) {
+                        return { weight: null, unit: null, status: 'stopped' };
+                    }
 
                     if (result.done) {
                         throw new Error('Stream ended - device disconnected');
                     }
 
-                    this.errorCount = 0; // Reset error count on successful read
+                    this.errorCount = 0;
                     const lines = this.processDataChunk(result.value);
                     
                     if (lines.length > 0) {
                         const response = lines[lines.length - 1];
-                        this.addToLog(`Raw data: "${response}"`); // Log raw data for debugging
+                        this.addToLog(`Raw data: "${response}"`);
                         return this.parseWeightResponse(response);
                     } else {
                         return { weight: null, unit: null, status: 'reading' };
                     }
 
                 } catch (error) {
+                    if (!this.isReading) {
+                        return { weight: null, unit: null, status: 'stopped' };
+                    }
+                    
                     this.errorCount++;
                     
-                    // More detailed error reporting
                     if (error.message.includes('Parity error')) {
                         if (this.errorCount === 1) {
-                            this.addToLog(`Parity error detected - check serial settings (currently: ${this.dataBitsSelect.value} data bits, ${this.paritySelect.value} parity)`);
+                            this.addToLog(`Parity error detected with current baud rate: ${this.baudRateSelect.value}`);
                             this.showError('Serial Configuration Error', 
-                                'Parity error detected. Try different settings:\n' +
-                                '• Standard Scale: 9600 baud, 7 data bits, Even parity, 1 stop bit\n' +
-                                '• Alternative: 9600 baud, 8 data bits, No parity, 1 stop bit\n' +
-                                '• RS232: 2400 baud, 7 data bits, Even parity, 1 stop bit'
+                                'Parity error detected. Try different baud rates:\n' +
+                                '• 9600 (most common)\n' +
+                                '• 2400 (older scales)\n' +
+                                '• 4800, 19200, or other rates'
                             );
                         }
                     } else if (error.message.includes('Timeout')) {
                         if (this.errorCount === 1) {
-                            this.addToLog('Timeout - scale may not be sending data. Check scale power and connection.');
+                            this.addToLog('Timeout - scale may not be sending data');
                         }
                     } else {
                         this.addToLog(`Read error (${this.errorCount}): ${error.message}`);
                     }
                     
                     if (this.errorCount >= this.maxConsecutiveErrors) {
-                        this.addToLog(`Stopping due to ${this.maxConsecutiveErrors} consecutive errors. Try different serial settings.`);
+                        this.addToLog(`Stopping due to ${this.maxConsecutiveErrors} consecutive errors. Try a different baud rate.`);
                         this.stopReading();
                         return { weight: null, unit: null, status: 'error' };
                     }
@@ -693,198 +651,4 @@
                         const result = await this.readSingleWeight();
                         this.updateWeightDisplay(result.weight, result.unit, result.status);
                         
-                        if (result.weight !== null) {
-                            this.addToLog(`Weight: ${result.weight} ${result.unit} - Status: ${result.status}`);
-                        } else {
-                            this.addToLog(`Status: ${result.status}`);
-                        }
-                    }, 1000);
-                } else {
-                    this.addToLog('Starting continuous reading...');
-                    this.updateStatus('Reading...', 'reading');
-                    
-                    const readContinuously = async () => {
-                        while (this.isReading) {
-                            try {
-                                const result = await this.readSingleWeight();
-                                
-                                if (!this.isReading) break;
-                                
-                                if (result.status !== 'reading') {
-                                    this.updateWeightDisplay(result.weight, result.unit, result.status);
-                                    
-                                    if (result.weight !== null) {
-                                        this.addToLog(`Weight: ${result.weight} ${result.unit} - Status: ${result.status}`);
-                                    } else if (result.status !== 'reading') {
-                                        this.addToLog(`Status: ${result.status}`);
-                                    }
-                                }
-                                
-                                await new Promise(resolve => setTimeout(resolve, 10));
-                                
-                            } catch (error) {
-                                this.addToLog(`Read loop error: ${error.message}`);
-                                break;
-                            }
-                        }
-                    };
-
-                    readContinuously();
-                }
-                
-                this.startBtn.disabled = true;
-                this.stopBtn.disabled = false;
-            }
-
-            async stopReading() {
-                if (!this.isReading) return;
-                
-                this.isReading = false;
-                
-                if (this.readingInterval) {
-                    clearInterval(this.readingInterval);
-                    this.readingInterval = null;
-                }
-                
-                this.addToLog('Stopped reading');
-                
-                if (this.testMode) {
-                    this.updateStatus('Test Mode', 'test');
-                } else {
-                    this.updateStatus('Connected (not reading)', 'connected');
-                }
-                
-                this.startBtn.disabled = false;
-                this.stopBtn.disabled = true;
-            }
-
-            processDataChunk(chunk) {
-                const decoder = new TextDecoder('ascii');
-                const text = decoder.decode(chunk, { stream: true });
-                this.lineBuffer += text;
-
-                const lines = [];
-                let lineEnd;
-                
-                while ((lineEnd = this.lineBuffer.indexOf('\r\n')) !== -1) {
-                    const line = this.lineBuffer.slice(0, lineEnd);
-                    lines.push(line);
-                    this.lineBuffer = this.lineBuffer.slice(lineEnd + 2);
-                }
-                
-                return lines;
-            }
-
-            parseWeightResponse(response) {
-                if (!response) {
-                    return { weight: null, unit: null, status: 'error' };
-                }
-
-                response = response.trim();
-
-                try {
-                    if (response.startsWith('ST')) {
-                        const parts = response.split(',');
-                        if (parts.length >= 2) {
-                            const weightPart = parts[2] || parts[1];
-                            if (weightPart && weightPart.includes(' ')) {
-                                const spaceIndex = weightPart.indexOf(' ');
-                                const weight = parseFloat(weightPart.substring(0, spaceIndex));
-                                const unit = weightPart.substring(spaceIndex + 1);
-                                return { weight, unit, status: 'stable' };
-                            }
-                        }
-                        return { weight: null, unit: null, status: 'error' };
-                    } 
-                    else if (response.startsWith('US')) {
-                        const parts = response.split(',');
-                        if (parts.length >= 2) {
-                            const weightPart = parts[2] || parts[1];
-                            if (weightPart && weightPart.includes(' ')) {
-                                const spaceIndex = weightPart.indexOf(' ');
-                                const weight = parseFloat(weightPart.substring(0, spaceIndex));
-                                const unit = weightPart.substring(spaceIndex + 1);
-                                return { weight, unit, status: 'unstable' };
-                            }
-                        }
-                        return { weight: null, unit: null, status: 'error' };
-                    }
-                    else if (response.startsWith('I')) {
-                        this.addToLog('Scale returns I (unstable)');
-                        return { weight: null, unit: null, status: 'unstable' };
-                    }
-                    else if (response.startsWith('?')) {
-                        this.addToLog('Invalid command');
-                        return { weight: null, unit: null, status: 'error' };
-                    }
-                    else if (response.startsWith('OL')) {
-                        this.addToLog('Overload condition');
-                        return { weight: null, unit: null, status: 'overload' };
-                    }
-                    else {
-                        this.addToLog(`Unknown response: ${response}`);
-                        return { weight: null, unit: null, status: 'error' };
-                    }
-                } catch (error) {
-                    this.addToLog(`Parse error: ${error.message}`);
-                    return { weight: null, unit: null, status: 'error' };
-                }
-            }
-
-            generateTestResponse() {
-                const response = this.testResponses[this.testDataIndex];
-                this.testDataIndex = (this.testDataIndex + 1) % this.testResponses.length;
-                return response;
-            }
-
-            updateWeightDisplay(weight, unit, status) {
-                const display = this.weightDisplay;
-                display.classList.remove('stable', 'unstable', 'overload', 'error', 'no-reading');
-                
-                if (weight !== null && !isNaN(weight)) {
-                    display.textContent = `${weight} ${unit}`;
-                    display.classList.add(status);
-                    this.chart.addDataPoint(weight, status);
-                } else {
-                    const statusMessages = {
-                        'unstable': 'UNSTABLE',
-                        'overload': 'OVERLOAD',
-                        'error': 'ERROR',
-                        'reading': 'READING...'
-                    };
-                    
-                    display.textContent = statusMessages[status] || 'NO DATA';
-                    display.classList.add(status === 'reading' ? 'no-reading' : status);
-                    this.chart.addDataPoint(null, status);
-                }
-            }
-
-            updateStatus(message, className) {
-                this.status.textContent = message;
-                this.status.className = `status ${className}`;
-            }
-
-            addToLog(message) {
-                const timestamp = new Date().toLocaleTimeString();
-                const logMessage = `[${timestamp}] ${message}`;
-                
-                this.logDisplay.textContent += logMessage + '\n';
-                this.logDisplay.scrollTop = this.logDisplay.scrollHeight;
-            }
-
-            showError(title, details) {
-                this.errorInfo.innerHTML = `<strong>${title}</strong><br>${details}`;
-                this.errorInfo.style.display = 'block';
-            }
-
-            hideError() {
-                this.errorInfo.style.display = 'none';
-            }
-        }
-
-        document.addEventListener('DOMContentLoaded', () => {
-            new WebScaleReader();
-        });
-    </script>
-</body>
-</html>
+                        if
