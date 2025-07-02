@@ -765,4 +765,240 @@
                         addToLog(`Saved new port preference: ${portId}`);
                     }
 
-           
+                    const newWriter = selectedPort.writable.getWriter();
+                    const newReader = selectedPort.readable.getReader();
+                    lineBufferRef.current = '';
+                    
+                    setPort(selectedPort);
+                    setWriter(newWriter);
+                    setReader(newReader);
+                    
+                    addToLog('Connected successfully');
+                    updateStatus('Connected', 'connected');
+                    setChartData([]);
+
+                } catch (error) {
+                    addToLog(`Connection error: ${error.message}`);
+                    showError('Connection Error', error.message);
+                    updateStatus('Connection failed', 'disconnected');
+                    
+                    if (port) {
+                        try {
+                            await port.close();
+                        } catch (closeError) {
+                            console.log('Error closing port:', closeError);
+                        }
+                        setPort(null);
+                    }
+                }
+            }, [testMode, baudRate, port, addToLog, hideError, showError, updateStatus, getCookie, setCookie, getPortId]);
+
+            const disconnect = useCallback(async () => {
+                try {
+                    hideError();
+                    
+                    await stopReading();
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    
+                    if (reader) {
+                        try {
+                            await reader.cancel();
+                            await reader.releaseLock();
+                        } catch (error) {
+                            console.log('Reader cleanup error (ignored):', error);
+                        }
+                        setReader(null);
+                    }
+                    
+                    if (writer) {
+                        try {
+                            await writer.close();
+                        } catch (error) {
+                            console.log('Writer close error (ignored):', error);
+                        }
+                        setWriter(null);
+                    }
+                    
+                    if (port) {
+                        try {
+                            await port.close();
+                        } catch (error) {
+                            console.log('Port close error (ignored):', error);
+                        }
+                        setPort(null);
+                    }
+
+                    addToLog('Disconnected from scale');
+                    updateStatus('Disconnected', 'disconnected');
+                    updateWeightDisplay(null, null, 'no-reading');
+
+                } catch (error) {
+                    if (!error.message.includes('Parity error')) {
+                        addToLog(`Disconnect error: ${error.message}`);
+                        showError('Disconnect error', error.message);
+                    } else {
+                        console.log('Parity error during disconnect (ignored):', error);
+                        addToLog('Disconnected (with communication errors)');
+                        updateStatus('Disconnected', 'disconnected');
+                        updateWeightDisplay(null, null, 'no-reading');
+                    }
+                }
+            }, [hideError, stopReading, reader, writer, port, addToLog, showError, updateStatus, updateWeightDisplay]);
+
+            const toggleTestMode = useCallback(() => {
+                const newTestMode = !testMode;
+                setTestMode(newTestMode);
+                
+                if (newTestMode) {
+                    addToLog('Test mode enabled');
+                    updateStatus('Test Mode', 'test');
+                    setChartData([]);
+                } else {
+                    addToLog('Test mode disabled');
+                    updateStatus('Disconnected', 'disconnected');
+                    stopReading();
+                }
+            }, [testMode, addToLog, updateStatus, stopReading]);
+
+            // Add a function to clear saved port preference
+            const clearSavedPort = useCallback(() => {
+                deleteCookie('lastUsedPortId');
+                addToLog('Cleared saved port preference');
+            }, [deleteCookie, addToLog]);
+
+            // Auto-scroll log
+            const logRef = useRef(null);
+            useEffect(() => {
+                if (logRef.current) {
+                    logRef.current.scrollTop = logRef.current.scrollHeight;
+                }
+            }, [log]);
+
+            return (
+                <div className="container">
+                    <h1>Scale Reader - Web Serial API (React CDN)</h1>
+                    
+                    <div className="controls">
+                        <button 
+                            className="connect" 
+                            onClick={connect} 
+                            disabled={!!port || testMode}
+                        >
+                            Connect to Scale
+                        </button>
+                        <button 
+                            className="disconnect" 
+                            onClick={disconnect} 
+                            disabled={!port}
+                        >
+                            Disconnect
+                        </button>
+                        <button 
+                            className="start" 
+                            onClick={startReading} 
+                            disabled={(!port && !testMode) || isReading}
+                        >
+                            Start Reading
+                        </button>
+                        <button 
+                            className="stop" 
+                            onClick={stopReading} 
+                            disabled={!isReading}
+                        >
+                            Stop Reading
+                        </button>
+                        <button 
+                            className={`test-toggle ${testMode ? 'active' : ''}`} 
+                            onClick={toggleTestMode}
+                            disabled={!!port}
+                        >
+                            {testMode ? 'Disable' : 'Enable'} Test Mode
+                        </button>
+                        <button 
+                            onClick={clearSavedPort}
+                            disabled={!!port}
+                            style={{ 
+                                padding: '8px 16px', 
+                                margin: '5px', 
+                                fontSize: '14px', 
+                                background: '#6c757d', 
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '4px',
+                                cursor: 'pointer'
+                            }}
+                        >
+                            Clear Saved Port
+                        </button>
+                        
+                        <div style={{ margin: '10px 0', display: 'block' }}>
+                            <div style={{ display: 'inline-block', marginRight: '20px' }}>
+                                <label htmlFor="baudRateSelect" style={{ marginRight: '10px', fontWeight: 'bold' }}>
+                                    Baud Rate:
+                                </label>
+                                <select 
+                                    id="baudRateSelect" 
+                                    value={baudRate}
+                                    onChange={(e) => setBaudRate(parseInt(e.target.value))}
+                                    disabled={!!port}
+                                    style={{ padding: '8px', fontSize: '14px', borderRadius: '4px', border: '1px solid #ccc' }}
+                                >
+                                    <option value={2400}>2400</option>
+                                    <option value={4800}>4800</option>
+                                    <option value={9600}>9600 (Default)</option>
+                                    <option value={19200}>19200</option>
+                                    <option value={38400}>38400</option>
+                                    <option value={57600}>57600</option>
+                                    <option value={115200}>115200</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div className={`status ${status.className}`}>{status.message}</div>
+                    
+                    <div className="display-container">
+                        <div className={`weight-display ${weightDisplay.className}`}>
+                            {weightDisplay.text}
+                        </div>
+                        
+                        <WeightChart data={chartData} />
+                    </div>
+                    
+                    {errorInfo.visible && (
+                        <div className="error-info">
+                            <strong>{errorInfo.title}</strong><br />
+                            {errorInfo.details}
+                        </div>
+                    )}
+                    
+                    {testMode && (
+                        <div className="test-info">
+                            <strong>Test Mode Active:</strong> Simulating scale responses with all possible states (stable, unstable, overload, error)
+                        </div>
+                    )}
+                    
+                    <div className="info">
+                        <strong>Troubleshooting Connection Issues:</strong>
+                        <ul>
+                            <li>Make sure your scale is properly connected via USB</li>
+                            <li>Check that no other applications are using the serial port</li>
+                            <li>Try unplugging and reconnecting the USB cable</li>
+                            <li>Verify the scale is powered on and responding</li>
+                            <li>On Linux: Check if you have permissions to access /dev/ttyUSB* devices</li>
+                            <li><strong>Testing:</strong> Use "Enable Test Mode" to test the interface without hardware</li>
+                        </ul>
+                    </div>
+                    
+                    <h3>Activity Log:</h3>
+                    <div ref={logRef} className="log">{log}</div>
+                </div>
+            );
+        };
+
+        // Render the App
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+</html>
+
