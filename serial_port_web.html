@@ -234,7 +234,8 @@
                     stable: '#28a745',
                     unstable: '#ffc107', 
                     overload: '#9c27b0',
-                    error: '#dc3545'
+                    error: '#dc3545',
+                    idle: '#6c757d'
                 };
                 
                 this.resizeCanvas();
@@ -268,9 +269,34 @@
                 this.redraw();
             }
 
+            // Calculate automatic scale range based on actual data
+            getWeightRange() {
+                const validWeights = this.data
+                    .filter(d => d.weight !== null && !isNaN(d.weight))
+                    .map(d => d.weight);
+                
+                if (validWeights.length === 0) {
+                    return { min: 0, max: 10, range: 10 }; // Default range when no data
+                }
+                
+                const minWeight = Math.min(...validWeights);
+                const maxWeight = Math.max(...validWeights);
+                
+                // Add 10% padding above and below the data range
+                const dataRange = maxWeight - minWeight;
+                const padding = Math.max(dataRange * 0.1, 1); // At least 1kg padding
+                
+                const min = Math.max(0, minWeight - padding); // Don't go below 0
+                const max = maxWeight + padding;
+                const range = max - min;
+                
+                return { min, max, range };
+            }
+
             redraw() {
+                this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+                
                 if (this.data.length === 0) {
-                    this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
                     this.ctx.fillStyle = '#666';
                     this.ctx.font = '14px Arial';
                     this.ctx.textAlign = 'center';
@@ -278,59 +304,125 @@
                     return;
                 }
                 
-                this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+                const { min: minWeight, max: maxWeight, range: weightRange } = this.getWeightRange();
                 
-                const minWeight = 0;
-                const maxWeight = 100;
-                const weightRange = maxWeight - minWeight;
-                
-                const padding = 40;
+                const padding = 50; // Increased padding for labels
                 const chartWidth = this.canvas.width - 2 * padding;
                 const chartHeight = this.canvas.height - 2 * padding;
                 
-                this.drawAxes(padding, chartWidth, chartHeight, minWeight, maxWeight);
+                this.drawAxes(padding, chartWidth, chartHeight, minWeight, maxWeight, weightRange);
                 this.drawDataPoints(padding, chartWidth, chartHeight, minWeight, weightRange);
+                this.drawDataLine(padding, chartWidth, chartHeight, minWeight, weightRange);
             }
 
-            drawAxes(padding, chartWidth, chartHeight, minWeight, maxWeight) {
+            drawAxes(padding, chartWidth, chartHeight, minWeight, maxWeight, weightRange) {
                 this.ctx.strokeStyle = '#333';
                 this.ctx.lineWidth = 1;
                 
+                // Y-axis
                 this.ctx.beginPath();
                 this.ctx.moveTo(padding, padding);
                 this.ctx.lineTo(padding, padding + chartHeight);
                 this.ctx.stroke();
                 
+                // X-axis
                 this.ctx.beginPath();
                 this.ctx.moveTo(padding, padding + chartHeight);
                 this.ctx.lineTo(padding + chartWidth, padding + chartHeight);
                 this.ctx.stroke();
                 
+                // Y-axis labels (weight values)
                 this.ctx.fillStyle = '#333';
                 this.ctx.font = '10px Arial';
                 this.ctx.textAlign = 'right';
                 
-                for (let i = 0; i <= 10; i++) {
-                    const y = padding + (chartHeight * i / 10);
-                    const weight = maxWeight - (i * 10);
-                    this.ctx.fillText(`${weight}kg`, padding - 3, y + 2);
+                const numLabels = 8;
+                for (let i = 0; i <= numLabels; i++) {
+                    const y = padding + (chartHeight * i / numLabels);
+                    const weight = maxWeight - (i * weightRange / numLabels);
+                    this.ctx.fillText(`${weight.toFixed(1)}kg`, padding - 5, y + 3);
+                    
+                    // Draw grid lines
+                    this.ctx.strokeStyle = '#e0e0e0';
+                    this.ctx.lineWidth = 0.5;
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(padding, y);
+                    this.ctx.lineTo(padding + chartWidth, y);
+                    this.ctx.stroke();
                 }
+                
+                // X-axis labels (time - show only first, middle, and last)
+                this.ctx.textAlign = 'center';
+                if (this.data.length > 1) {
+                    const timeLabels = [
+                        { index: 0, label: 'Start' },
+                        { index: Math.floor(this.data.length / 2), label: 'Middle' },
+                        { index: this.data.length - 1, label: 'Latest' }
+                    ];
+                    
+                    timeLabels.forEach(({ index, label }) => {
+                        const x = padding + (chartWidth * index / (this.data.length - 1));
+                        this.ctx.fillText(label, x, padding + chartHeight + 15);
+                    });
+                }
+                
+                // Chart title with current range
+                this.ctx.textAlign = 'center';
+                this.ctx.font = 'bold 12px Arial';
+                this.ctx.fillText(
+                    `Weight History (${minWeight.toFixed(1)} - ${maxWeight.toFixed(1)} kg)`, 
+                    this.canvas.width / 2, 
+                    20
+                );
+            }
+
+            drawDataLine(padding, chartWidth, chartHeight, minWeight, weightRange) {
+                const validData = this.data.filter(d => d.weight !== null && !isNaN(d.weight));
+                if (validData.length < 2) return;
+                
+                this.ctx.strokeStyle = '#007bff';
+                this.ctx.lineWidth = 1;
+                this.ctx.beginPath();
+                
+                let firstPoint = true;
+                validData.forEach((point) => {
+                    const dataIndex = this.data.indexOf(point);
+                    const x = padding + (chartWidth * dataIndex / (this.data.length - 1));
+                    const y = padding + chartHeight - ((point.weight - minWeight) / weightRange) * chartHeight;
+                    
+                    if (firstPoint) {
+                        this.ctx.moveTo(x, y);
+                        firstPoint = false;
+                    } else {
+                        this.ctx.lineTo(x, y);
+                    }
+                });
+                
+                this.ctx.stroke();
             }
 
             drawDataPoints(padding, chartWidth, chartHeight, minWeight, weightRange) {
-                const validData = this.data.filter(d => d.weight !== null);
-                if (validData.length < 2) return;
-                
-                validData.forEach((point, index) => {
-                    const dataIndex = this.data.indexOf(point);
-                    const x = padding + (chartWidth * dataIndex / (this.data.length - 1));
-                    const clampedWeight = Math.max(0, Math.min(100, point.weight));
-                    const y = padding + chartHeight - ((clampedWeight - minWeight) / weightRange) * chartHeight;
+                this.data.forEach((point, index) => {
+                    const x = padding + (chartWidth * index / (this.data.length - 1));
                     
-                    this.ctx.fillStyle = this.colors[point.status] || '#666';
-                    this.ctx.beginPath();
-                    this.ctx.arc(x, y, 3, 0, 2 * Math.PI);
-                    this.ctx.fill();
+                    if (point.weight !== null && !isNaN(point.weight)) {
+                        const y = padding + chartHeight - ((point.weight - minWeight) / weightRange) * chartHeight;
+                        
+                        this.ctx.fillStyle = this.colors[point.status] || '#666';
+                        this.ctx.beginPath();
+                        this.ctx.arc(x, y, 3, 0, 2 * Math.PI);
+                        this.ctx.fill();
+                        
+                        // Add white border to make points more visible
+                        this.ctx.strokeStyle = '#fff';
+                        this.ctx.lineWidth = 1;
+                        this.ctx.stroke();
+                    } else {
+                        // Draw status indicators for non-weight data (overload, error, etc.)
+                        const y = padding + chartHeight / 2; // Middle of chart
+                        this.ctx.fillStyle = this.colors[point.status] || '#666';
+                        this.ctx.fillRect(x - 2, y - 2, 4, 4); // Small square
+                    }
                 });
             }
         }
@@ -347,6 +439,8 @@
                 this.testDataIndex = 0;
                 this.errorCount = 0;
                 this.maxConsecutiveErrors = 5;
+                this.lastWeight = null; // Track weight changes
+                this.lastStatus = null; // Track status changes
                 
                 this.connectBtn = document.getElementById('connectBtn');
                 this.disconnectBtn = document.getElementById('disconnectBtn');
@@ -363,17 +457,17 @@
                 this.chart = new WeightChart('weightChart');
                 
                 this.testResponses = [
-                    'ST,GS,+00150.25 kg',
-                    'ST,GS,+00150.30 kg',
-                    'US,GS,+00149.80 kg',
-                    'US,GS,+00151.20 kg',
-                    'ST,GS,+00150.00 kg',
+                    'ST,+00150.25 kg',
+                    'ST,+00150.30 kg',
+                    'US,+00149.80 kg',
+                    'US,+00151.20 kg',
+                    'ST,+00150.00 kg',
                     'I',
-                    'ST,GS,+00000.00 kg',
-                    'US,GS,+00149.95 kg',
-                    'ST,GS,+00150.50 kg',
-                    'OL',
-                    'ST,GS,+00150.25 kg',
+                    'ST,+00000.00 kg',
+                    'US,+00149.95 kg',
+                    'ST,+00150.50 kg',
+                    'OL,+99999.99 kg',   // Your scale's actual overload format
+                    'ST,+00150.25 kg',
                     '?'
                 ];
                 
@@ -535,6 +629,108 @@
                 }
             }
 
+            async startReading() {
+                if (this.isReading) return;
+
+                this.errorCount = 0;
+                this.isReading = true;
+                
+                if (this.testMode) {
+                    this.addToLog('Starting test simulation...');
+                    this.updateStatus('Simulating...', 'reading');
+                    
+                    // Fast test mode - every 200ms
+                    this.readingInterval = setInterval(async () => {
+                        if (!this.isReading) return;
+                        
+                        const result = await this.readSingleWeight();
+                        this.updateWeightDisplay(result.weight, result.unit, result.status);
+                        
+                        if (result.weight !== null) {
+                            this.addToLog(`Weight ${result.status}: ${result.weight} kg`);
+                        } else {
+                            this.addToLog(`Status: ${result.status}`);
+                        }
+                        
+                        if (result.status === 'error' && this.errorCount >= this.maxConsecutiveErrors) {
+                            this.addToLog('Error state detected in test mode');
+                            this.stopReading();
+                        }
+                    }, 200);
+                } else {
+                    this.addToLog('Starting continuous reading...');
+                    this.updateStatus('Reading...', 'reading');
+                    
+                    // Continuous real-time reading
+                    const readContinuously = async () => {
+                        while (this.isReading) {
+                            try {
+                                const result = await this.readSingleWeight();
+                                
+                                if (!this.isReading) break;
+                                
+                                // Update display for all valid data
+                                if (result.status !== 'reading' && result.status !== 'stopped') {
+                                    this.updateWeightDisplay(result.weight, result.unit, result.status);
+                                    
+                                    // Log everything - no spam prevention
+                                    if (result.weight !== null) {
+                                        this.addToLog(`Weight ${result.status}: ${result.weight} kg`);
+                                    } else {
+                                        this.addToLog(`Status: ${result.status}`);
+                                    }
+                                }
+                                
+                                // Stop on persistent errors
+                                if (result.status === 'error' && this.errorCount >= this.maxConsecutiveErrors) {
+                                    break;
+                                }
+                                
+                                // Very small delay to prevent overwhelming the browser
+                                await new Promise(resolve => setTimeout(resolve, 10));
+                                
+                            } catch (error) {
+                                this.addToLog(`Read loop error: ${error.message}`);
+                                break;
+                            }
+                        }
+                    };
+
+                    readContinuously();
+                }
+                
+                this.startBtn.disabled = true;
+                this.stopBtn.disabled = false;
+            }
+
+            async stopReading() {
+                if (!this.isReading) return;
+                
+                this.isReading = false;
+                
+                // Clear interval for test mode
+                if (this.readingInterval) {
+                    clearInterval(this.readingInterval);
+                    this.readingInterval = null;
+                }
+                
+                // Small delay to let any in-flight reads complete
+                await new Promise(resolve => setTimeout(resolve, 50));
+                
+                this.addToLog('Stopped reading');
+                
+                if (this.testMode) {
+                    this.updateStatus('Test Mode', 'test');
+                } else if (this.port) {
+                    this.updateStatus('Connected (not reading)', 'connected');
+                } else {
+                    this.updateStatus('Disconnected', 'disconnected');
+                }
+                
+                this.startBtn.disabled = false;
+                this.stopBtn.disabled = true;
+            }
+
             async readSingleWeight() {
                 if (this.testMode) {
                     const response = this.generateTestResponse();
@@ -549,7 +745,7 @@
                     const result = await Promise.race([
                         this.reader.read(),
                         new Promise((_, reject) => 
-                            setTimeout(() => reject(new Error('Timeout - no data received')), 2000)
+                            setTimeout(() => reject(new Error('Timeout - no data received')), 1000)
                         )
                     ]);
 
@@ -566,6 +762,7 @@
                     
                     if (lines.length > 0) {
                         const response = lines[lines.length - 1];
+                        // Log all raw data
                         this.addToLog(`Raw data: "${response}"`);
                         return this.parseWeightResponse(response);
                     } else {
@@ -579,9 +776,10 @@
                     
                     this.errorCount++;
                     
+                    // Log all errors
                     if (error.message.includes('Parity error')) {
+                        this.addToLog(`Parity error detected with current baud rate: ${this.baudRateSelect.value}`);
                         if (this.errorCount === 1) {
-                            this.addToLog(`Parity error detected with current baud rate: ${this.baudRateSelect.value}`);
                             this.showError('Serial Configuration Error', 
                                 'Parity error detected. Try different baud rates:\n' +
                                 '• 9600 (most common)\n' +
@@ -590,9 +788,7 @@
                             );
                         }
                     } else if (error.message.includes('Timeout')) {
-                        if (this.errorCount === 1) {
-                            this.addToLog('Timeout - scale may not be sending data');
-                        }
+                        this.addToLog('Timeout - scale may not be sending data');
                     } else {
                         this.addToLog(`Read error (${this.errorCount}): ${error.message}`);
                     }
@@ -605,6 +801,111 @@
                     
                     return { weight: null, unit: null, status: 'error' };
                 }
+            }
+
+            processDataChunk(chunk) {
+                const decoder = new TextDecoder('ascii');
+                const text = decoder.decode(chunk, { stream: true });
+                this.lineBuffer += text;
+
+                const lines = [];
+                let lineEnd;
+                
+                while ((lineEnd = this.lineBuffer.indexOf('\r\n')) !== -1) {
+                    const line = this.lineBuffer.slice(0, lineEnd);
+                    lines.push(line);
+                    this.lineBuffer = this.lineBuffer.slice(lineEnd + 2);
+                }
+                
+                return lines;
+            }
+
+            parseWeightResponse(response) {
+                response = response.trim();
+                
+                if (response === 'I') {
+                    this.addToLog('Scale is idle');
+                    return { weight: null, unit: null, status: 'idle' };
+                }
+                
+                // Handle overload in your scale's format: OL,+99999.99 kg
+                if (response.startsWith('OL,')) {
+                    this.addToLog('Scale overload detected');
+                    return { weight: null, unit: null, status: 'overload' };
+                }
+                
+                // Handle simple overload format: OL
+                if (response === 'OL') {
+                    this.addToLog('Scale overload');
+                    return { weight: null, unit: null, status: 'overload' };
+                }
+                
+                // Handle your scale's normal format: ST,+00002.78 kg or US,+00002.78 kg
+                const regex = /^(ST|US),([+-]?\d+(?:\.\d+)?)\s*kg$/;
+                const match = response.match(regex);
+                
+                if (match) {
+                    const status = match[1] === 'ST' ? 'stable' : 'unstable';
+                    const weight = parseFloat(match[2]);
+                    
+                    return { weight: weight, unit: 'kg', status: status };
+                }
+                
+                // Log all unknown formats
+                this.addToLog(`Unknown response format: "${response}"`);
+                return { weight: null, unit: null, status: 'error' };
+            }
+
+            generateTestResponse() {
+                const response = this.testResponses[this.testDataIndex];
+                this.testDataIndex = (this.testDataIndex + 1) % this.testResponses.length;
+                return response;
+            }
+
+            updateWeightDisplay(weight, unit, status) {
+                const display = this.weightDisplay;
+                display.classList.remove('stable', 'unstable', 'overload', 'error', 'no-reading', 'idle');
+                
+                if (weight !== null && !isNaN(weight)) {
+                    display.textContent = `${weight} ${unit}`;
+                    display.classList.add(status);
+                    this.chart.addDataPoint(weight, status);
+                } else {
+                    const statusMessages = {
+                        'unstable': 'UNSTABLE',
+                        'overload': 'OVERLOAD',
+                        'error': 'ERROR',
+                        'reading': 'READING...',
+                        'idle': 'IDLE',
+                        'no-reading': 'NO DATA'
+                    };
+                    
+                    display.textContent = statusMessages[status] || 'NO DATA';
+                    display.classList.add(status === 'reading' ? 'no-reading' : status);
+                    this.chart.addDataPoint(null, status);
+                }
+            }
+
+            updateStatus(message, className) {
+                this.status.textContent = message;
+                this.status.className = `status ${className}`;
+            }
+
+            addToLog(message) {
+                const timestamp = new Date().toLocaleTimeString();
+                const logMessage = `[${timestamp}] ${message}`;
+                
+                this.logDisplay.textContent += logMessage + '\n';
+                this.logDisplay.scrollTop = this.logDisplay.scrollHeight;
+            }
+
+            showError(title, details) {
+                this.errorInfo.innerHTML = `<strong>${title}</strong><br>${details}`;
+                this.errorInfo.style.display = 'block';
+            }
+
+            hideError() {
+                this.errorInfo.style.display = 'none';
             }
 
             getDetailedErrorMessage(error) {
@@ -634,21 +935,11 @@
                     details: error.message
                 };
             }
+        }
 
-            async startReading() {
-                if (this.isReading) return;
-
-                this.errorCount = 0;
-                this.isReading = true;
-                
-                if (this.testMode) {
-                    this.addToLog('Starting test simulation...');
-                    this.updateStatus('Simulating...', 'reading');
-                    
-                    this.readingInterval = setInterval(async () => {
-                        if (!this.isReading) return;
-                        
-                        const result = await this.readSingleWeight();
-                        this.updateWeightDisplay(result.weight, result.unit, result.status);
-                        
-                        if
+        document.addEventListener('DOMContentLoaded', () => {
+            new WebScaleReader();
+        });
+    </script>
+</body>
+</html>

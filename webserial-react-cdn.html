@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scale Reader - React CDN</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .container {
+            background: #f5f5f5;
+            padding: 20px;
+            border-radius: 8px;
+        }
+        .display-container {
+            margin: 20px 0;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            font-size: 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .connect { background: #4CAF50; color: white; }
+        .disconnect { background: #f44336; color: white; }
+        .start { background: #2196F3; color: white; }
+        .stop { background: #ff9800; color: white; }
+        .test-toggle { background: #9c27b0; color: white; }
+        .test-toggle.active { background: #673ab7; }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        .status.connected { background: #d4edda; color: #155724; }
+        .status.disconnected { background: #f8d7da; color: #721c24; }
+        .status.reading { background: #cce5ff; color: #004085; }
+        .status.test { background: #e1bee7; color: #4a148c; }
+        .log {
+            background: #000;
+            color: #0f0;
+            padding: 15px;
+            border-radius: 4px;
+            height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 14px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        .weight-display {
+            font-size: 216px;
+            font-weight: bold;
+            text-align: center;
+            padding: 40px;
+            margin: 0 0 20px 0;
+            border-radius: 12px;
+            background: #e8f4fd;
+            border: 3px solid #ccc;
+            min-height: 200px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-shadow: 3px 3px 6px rgba(0,0,0,0.3);
+        }
+        .weight-display.stable { 
+            background: #d4edda; 
+            color: #155724; 
+            border-color: #28a745;
+        }
+        .weight-display.unstable { 
+            background: #fff3cd; 
+            color: #856404; 
+            border-color: #ffc107;
+        }
+        .weight-display.overload { 
+            background: #f8d7da; 
+            color: #721c24; 
+            border-color: #dc3545;
+        }
+        .weight-display.error { 
+            background: #f8d7da; 
+            color: #721c24; 
+            border-color: #dc3545;
+            font-size: 48px;
+        }
+        .weight-display.no-reading {
+            font-size: 24px;
+            background: #e8f4fd;
+            color: #666;
+            border-color: #ccc;
+        }
+        .weight-display.idle {
+            font-size: 48px;
+            background: #f8f9fa;
+            color: #6c757d;
+            border-color: #6c757d;
+        }
+        .graph-container {
+            border: 3px solid #ccc;
+            border-radius: 12px;
+            background: #fff;
+            padding: 20px;
+            margin: 0;
+            min-height: 200px;
+            position: relative;
+        }
+        .graph-title {
+            font-size: 14px;
+            font-weight: bold;
+            text-align: center;
+            margin-bottom: 10px;
+            color: #333;
+        }
+        #weightChart {
+            width: 100%;
+            height: 250px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .error-info {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 10px 0;
+            border-left: 4px solid #dc3545;
+            white-space: pre-line;
+        }
+        .info {
+            background: #d1ecf1;
+            color: #0c5460;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 10px 0;
+            border-left: 4px solid #bee5eb;
+        }
+        .test-info {
+            background: #e1bee7;
+            color: #4a148c;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 10px 0;
+            border-left: 4px solid #9c27b0;
+        }
+        @media (max-width: 768px) {
+            .display-container {
+                margin: 10px 0;
+            }
+            .weight-display {
+                font-size: 120px;
+                padding: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useCallback } = React;
+
+        // WeightChart Component
+        const WeightChart = ({ data }) => {
+            const canvasRef = useRef(null);
+            
+            const colors = {
+                stable: '#28a745',
+                unstable: '#ffc107', 
+                overload: '#9c27b0',
+                error: '#dc3545',
+                idle: '#6c757d'
+            };
+
+            const getWeightRange = useCallback(() => {
+                const validWeights = data
+                    .filter(d => d.weight !== null && !isNaN(d.weight))
+                    .map(d => d.weight);
+                
+                if (validWeights.length === 0) {
+                    return { min: 0, max: 10, range: 10 };
+                }
+                
+                const minWeight = Math.min(...validWeights);
+                const maxWeight = Math.max(...validWeights);
+                
+                const dataRange = maxWeight - minWeight;
+                const padding = Math.max(dataRange * 0.1, 1);
+                
+                const min = Math.max(0, minWeight - padding);
+                const max = maxWeight + padding;
+                const range = max - min;
+                
+                return { min, max, range };
+            }, [data]);
+
+            const drawChart = useCallback(() => {
+                const canvas = canvasRef.current;
+                if (!canvas) return;
+                
+                const ctx = canvas.getContext('2d');
+                const rect = canvas.parentElement.getBoundingClientRect();
+                canvas.width = rect.width - 40;
+                canvas.height = 300;
+                
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                
+                if (data.length === 0) {
+                    ctx.fillStyle = '#666';
+                    ctx.font = '14px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('No weight data available', canvas.width / 2, canvas.height / 2);
+                    return;
+                }
+                
+                const { min: minWeight, max: maxWeight, range: weightRange } = getWeightRange();
+                const padding = 50;
+                const chartWidth = canvas.width - 2 * padding;
+                const chartHeight = canvas.height - 2 * padding;
+                
+                // Draw axes
+                ctx.strokeStyle = '#333';
+                ctx.lineWidth = 1;
+                
+                // Y-axis
+                ctx.beginPath();
+                ctx.moveTo(padding, padding);
+                ctx.lineTo(padding, padding + chartHeight);
+                ctx.stroke();
+                
+                // X-axis
+                ctx.beginPath();
+                ctx.moveTo(padding, padding + chartHeight);
+                ctx.lineTo(padding + chartWidth, padding + chartHeight);
+                ctx.stroke();
+                
+                // Y-axis labels
+                ctx.fillStyle = '#333';
+                ctx.font = '10px Arial';
+                ctx.textAlign = 'right';
+                
+                const numLabels = 8;
+                for (let i = 0; i <= numLabels; i++) {
+                    const y = padding + (chartHeight * i / numLabels);
+                    const weight = maxWeight - (i * weightRange / numLabels);
+                    ctx.fillText(`${weight.toFixed(1)}kg`, padding - 5, y + 3);
+                    
+                    // Grid lines
+                    ctx.strokeStyle = '#e0e0e0';
+                    ctx.lineWidth = 0.5;
+                    ctx.beginPath();
+                    ctx.moveTo(padding, y);
+                    ctx.lineTo(padding + chartWidth, y);
+                    ctx.stroke();
+                }
+                
+                // X-axis labels
+                ctx.textAlign = 'center';
+                if (data.length > 1) {
+                    const timeLabels = [
+                        { index: 0, label: 'Start' },
+                        { index: Math.floor(data.length / 2), label: 'Middle' },
+                        { index: data.length - 1, label: 'Latest' }
+                    ];
+                    
+                    timeLabels.forEach(({ index, label }) => {
+                        const x = padding + (chartWidth * index / (data.length - 1));
+                        ctx.fillText(label, x, padding + chartHeight + 15);
+                    });
+                }
+                
+                // Chart title
+                ctx.textAlign = 'center';
+                ctx.font = 'bold 12px Arial';
+                ctx.fillText(
+                    `Weight History (${minWeight.toFixed(1)} - ${maxWeight.toFixed(1)} kg)`, 
+                    canvas.width / 2, 
+                    20
+                );
+                
+                // Draw data line
+                const validData = data.filter(d => d.weight !== null && !isNaN(d.weight));
+                if (validData.length >= 2) {
+                    ctx.strokeStyle = '#007bff';
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    
+                    let firstPoint = true;
+                    validData.forEach((point) => {
+                        const dataIndex = data.indexOf(point);
+                        const x = padding + (chartWidth * dataIndex / (data.length - 1));
+                        const y = padding + chartHeight - ((point.weight - minWeight) / weightRange) * chartHeight;
+                        
+                        if (firstPoint) {
+                            ctx.moveTo(x, y);
+                            firstPoint = false;
+                        } else {
+                            ctx.lineTo(x, y);
+                        }
+                    });
+                    ctx.stroke();
+                }
+                
+                // Draw data points
+                data.forEach((point, index) => {
+                    const x = padding + (chartWidth * index / (data.length - 1));
+                    
+                    if (point.weight !== null && !isNaN(point.weight)) {
+                        const y = padding + chartHeight - ((point.weight - minWeight) / weightRange) * chartHeight;
+                        
+                        ctx.fillStyle = colors[point.status] || '#666';
+                        ctx.beginPath();
+                        ctx.arc(x, y, 3, 0, 2 * Math.PI);
+                        ctx.fill();
+                        
+                        ctx.strokeStyle = '#fff';
+                        ctx.lineWidth = 1;
+                        ctx.stroke();
+                    } else {
+                        const y = padding + chartHeight / 2;
+                        ctx.fillStyle = colors[point.status] || '#666';
+                        ctx.fillRect(x - 2, y - 2, 4, 4);
+                    }
+                });
+                
+            }, [data, getWeightRange, colors]);
+
+            useEffect(() => {
+                drawChart();
+                
+                const handleResize = () => drawChart();
+                window.addEventListener('resize', handleResize);
+                
+                return () => window.removeEventListener('resize', handleResize);
+            }, [drawChart]);
+
+            return (
+                <div className="graph-container">
+                    <div className="graph-title">Weight History</div>
+                    <canvas ref={canvasRef} id="weightChart"></canvas>
+                </div>
+            );
+        };
+
+        // Main App Component
+        const App = () => {
+            // Cookie utility functions
+            const setCookie = useCallback((name, value, days = 30) => {
+                const expires = new Date();
+                expires.setTime(expires.getTime() + (days * 24 * 60 * 60 * 1000));
+                document.cookie = `${name}=${value};expires=${expires.toUTCString()};path=/`;
+            }, []);
+
+            const getCookie = useCallback((name) => {
+                const nameEQ = name + "=";
+                const ca = document.cookie.split(';');
+                for (let i = 0; i < ca.length; i++) {
+                    let c = ca[i];
+                    while (c.charAt(0) === ' ') c = c.substring(1, c.length);
+                    if (c.indexOf(nameEQ) === 0) return c.substring(nameEQ.length, c.length);
+                }
+                return null;
+            }, []);
+
+            const deleteCookie = useCallback((name) => {
+                document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`;
+            }, []);
+
+            // Port identification helper
+            const getPortId = useCallback((port) => {
+                const info = port.getInfo();
+                return `${info.usbVendorId || 'unknown'}-${info.usbProductId || 'unknown'}`;
+            }, []);
+
+            const [port, setPort] = useState(null);
+            const [reader, setReader] = useState(null);
+            const [writer, setWriter] = useState(null);
+            const [isReading, setIsReading] = useState(false);
+            const [testMode, setTestMode] = useState(false);
+            const [baudRate, setBaudRate] = useState(9600);
+            const [status, setStatus] = useState({ message: 'Disconnected', className: 'disconnected' });
+            const [weightDisplay, setWeightDisplay] = useState({ text: 'No reading available', className: 'no-reading' });
+            const [log, setLog] = useState('');
+            const [errorInfo, setErrorInfo] = useState({ visible: false, title: '', details: '' });
+            const [chartData, setChartData] = useState([]);
+            const [errorCount, setErrorCount] = useState(0);
+            
+            const maxConsecutiveErrors = 5;
+            const lineBufferRef = useRef('');
+            const isReadingRef = useRef(false);
+            const testDataIndexRef = useRef(0);
+            const readingIntervalRef = useRef(null);
+
+            const testResponses = [
+                'ST,+00150.25 kg',
+                'ST,+00150.30 kg',
+                'US,+00149.80 kg',
+                'US,+00151.20 kg',
+                'ST,+00150.00 kg',
+                'I',
+                'ST,+00000.00 kg',
+                'US,+00149.95 kg',
+                'ST,+00150.50 kg',
+                'OL,+99999.99 kg',
+                'ST,+00150.25 kg',
+                '?'
+            ];
+
+            const addToLog = useCallback((message) => {
+                const timestamp = new Date().toLocaleTimeString();
+                const logMessage = `[${timestamp}] ${message}`;
+                setLog(prev => prev + logMessage + '\n');
+            }, []);
+
+            const updateStatus = useCallback((message, className) => {
+                setStatus({ message, className });
+            }, []);
+
+            const updateWeightDisplay = useCallback((weight, unit, statusType) => {
+                const statusMessages = {
+                    'unstable': 'UNSTABLE',
+                    'overload': 'OVERLOAD',
+                    'error': 'ERROR',
+                    'reading': 'READING...',
+                    'idle': 'IDLE',
+                    'no-reading': 'NO DATA'
+                };
+
+                if (weight !== null && !isNaN(weight)) {
+                    setWeightDisplay({ text: `${weight} ${unit}`, className: statusType });
+                    setChartData(prev => {
+                        const newData = [...prev, { weight, status: statusType, timestamp: new Date() }];
+                        return newData.length > 300 ? newData.slice(-300) : newData;
+                    });
+                } else {
+                    setWeightDisplay({ 
+                        text: statusMessages[statusType] || 'NO DATA', 
+                        className: statusType === 'reading' ? 'no-reading' : statusType 
+                    });
+                    setChartData(prev => {
+                        const newData = [...prev, { weight: null, status: statusType, timestamp: new Date() }];
+                        return newData.length > 300 ? newData.slice(-300) : newData;
+                    });
+                }
+            }, []);
+
+            const showError = useCallback((title, details) => {
+                setErrorInfo({ visible: true, title, details });
+            }, []);
+
+            const hideError = useCallback(() => {
+                setErrorInfo({ visible: false, title: '', details: '' });
+            }, []);
+
+            const processDataChunk = useCallback((chunk) => {
+                const decoder = new TextDecoder('ascii');
+                const text = decoder.decode(chunk, { stream: true });
+                lineBufferRef.current += text;
+
+                const lines = [];
+                let lineEnd;
+                
+                while ((lineEnd = lineBufferRef.current.indexOf('\r\n')) !== -1) {
+                    const line = lineBufferRef.current.slice(0, lineEnd);
+                    lines.push(line);
+                    lineBufferRef.current = lineBufferRef.current.slice(lineEnd + 2);
+                }
+                
+                return lines;
+            }, []);
+
+            const parseWeightResponse = useCallback((response) => {
+                response = response.trim();
+                
+                if (response === 'I') {
+                    addToLog('Scale is idle');
+                    return { weight: null, unit: null, status: 'idle' };
+                }
+                
+                if (response.startsWith('OL,')) {
+                    addToLog('Scale overload detected');
+                    return { weight: null, unit: null, status: 'overload' };
+                }
+                
+                if (response === 'OL') {
+                    addToLog('Scale overload');
+                    return { weight: null, unit: null, status: 'overload' };
+                }
+                
+                const regex = /^(ST|US),([+-]?\d+(?:\.\d+)?)\s*kg$/;
+                const match = response.match(regex);
+                
+                if (match) {
+                    const status = match[1] === 'ST' ? 'stable' : 'unstable';
+                    const weight = parseFloat(match[2]);
+                    return { weight: weight, unit: 'kg', status: status };
+                }
+                
+                addToLog(`Unknown response format: "${response}"`);
+                return { weight: null, unit: null, status: 'error' };
+            }, [addToLog]);
+
+            const generateTestResponse = useCallback(() => {
+                const response = testResponses[testDataIndexRef.current];
+                testDataIndexRef.current = (testDataIndexRef.current + 1) % testResponses.length;
+                return response;
+            }, [testResponses]);
+
+            const readSingleWeight = useCallback(async () => {
+                if (testMode) {
+                    const response = generateTestResponse();
+                    return parseWeightResponse(response);
+                }
+                
+                if (!isReadingRef.current) {
+                    return { weight: null, unit: null, status: 'stopped' };
+                }
+                
+                try {
+                    const result = await Promise.race([
+                        reader.read(),
+                        new Promise((_, reject) => 
+                            setTimeout(() => reject(new Error('Timeout - no data received')), 1000)
+                        )
+                    ]);
+
+                    if (!isReadingRef.current) {
+                        return { weight: null, unit: null, status: 'stopped' };
+                    }
+
+                    if (result.done) {
+                        throw new Error('Stream ended - device disconnected');
+                    }
+
+                    setErrorCount(0);
+                    const lines = processDataChunk(result.value);
+                    
+                    if (lines.length > 0) {
+                        const response = lines[lines.length - 1];
+                        addToLog(`Raw data: "${response}"`);
+                        return parseWeightResponse(response);
+                    } else {
+                        return { weight: null, unit: null, status: 'reading' };
+                    }
+
+                } catch (error) {
+                    if (!isReadingRef.current) {
+                        return { weight: null, unit: null, status: 'stopped' };
+                    }
+                    
+                    setErrorCount(prev => {
+                        const newCount = prev + 1;
+                        
+                        if (error.message.includes('Parity error')) {
+                            addToLog(`Parity error detected with current baud rate: ${baudRate}`);
+                            if (newCount === 1) {
+                                showError('Serial Configuration Error', 
+                                    'Parity error detected. Try different baud rates:\n' +
+                                    '• 9600 (most common)\n' +
+                                    '• 2400 (older scales)\n' +
+                                    '• 4800, 19200, or other rates'
+                                );
+                            }
+                        } else if (error.message.includes('Timeout')) {
+                            addToLog('Timeout - scale may not be sending data');
+                        } else {
+                            addToLog(`Read error (${newCount}): ${error.message}`);
+                        }
+                        
+                        return newCount;
+                    });
+                    
+                    return { weight: null, unit: null, status: 'error' };
+                }
+            }, [testMode, reader, baudRate, addToLog, parseWeightResponse, generateTestResponse, processDataChunk, showError]);
+
+            const startReading = useCallback(async () => {
+                if (isReading) return;
+
+                setErrorCount(0);
+                setIsReading(true);
+                isReadingRef.current = true;
+                
+                if (testMode) {
+                    addToLog('Starting test simulation...');
+                    updateStatus('Simulating...', 'reading');
+                    
+                    readingIntervalRef.current = setInterval(async () => {
+                        if (!isReadingRef.current) return;
+                        
+                        const result = await readSingleWeight();
+                        updateWeightDisplay(result.weight, result.unit, result.status);
+                        
+                        if (result.weight !== null) {
+                            addToLog(`Weight ${result.status}: ${result.weight} kg`);
+                        } else {
+                            addToLog(`Status: ${result.status}`);
+                        }
+                        
+                        if (result.status === 'error' && errorCount >= maxConsecutiveErrors) {
+                            addToLog('Error state detected in test mode');
+                            stopReading();
+                        }
+                    }, 200);
+                } else {
+                    addToLog('Starting continuous reading...');
+                    updateStatus('Reading...', 'reading');
+                    
+                    const readContinuously = async () => {
+                        while (isReadingRef.current) {
+                            try {
+                                const result = await readSingleWeight();
+                                
+                                if (!isReadingRef.current) break;
+                                
+                                if (result.status !== 'reading' && result.status !== 'stopped') {
+                                    updateWeightDisplay(result.weight, result.unit, result.status);
+                                    
+                                    if (result.weight !== null) {
+                                        addToLog(`Weight ${result.status}: ${result.weight} kg`);
+                                    } else {
+                                        addToLog(`Status: ${result.status}`);
+                                    }
+                                }
+                                
+                                if (result.status === 'error' && errorCount >= maxConsecutiveErrors) {
+                                    break;
+                                }
+                                
+                                await new Promise(resolve => setTimeout(resolve, 10));
+                                
+                            } catch (error) {
+                                addToLog(`Read loop error: ${error.message}`);
+                                break;
+                            }
+                        }
+                    };
+
+                    readContinuously();
+                }
+            }, [isReading, testMode, addToLog, updateStatus, readSingleWeight, updateWeightDisplay, errorCount]);
+
+            const stopReading = useCallback(async () => {
+                if (!isReading) return;
+                
+                setIsReading(false);
+                isReadingRef.current = false;
+                
+                if (readingIntervalRef.current) {
+                    clearInterval(readingIntervalRef.current);
+                    readingIntervalRef.current = null;
+                }
+                
+                await new Promise(resolve => setTimeout(resolve, 50));
+                
+                addToLog('Stopped reading');
+                
+                if (testMode) {
+                    updateStatus('Test Mode', 'test');
+                } else if (port) {
+                    updateStatus('Connected (not reading)', 'connected');
+                } else {
+                    updateStatus('Disconnected', 'disconnected');
+                }
+            }, [isReading, testMode, port, addToLog, updateStatus]);
+
+            const connect = useCallback(async () => {
+                if (testMode) {
+                    addToLog('Cannot connect to real scale in test mode');
+                    return;
+                }
+                
+                try {
+                    hideError();
+                    
+                    if (!('serial' in navigator)) {
+                        throw new Error('Web Serial API not supported in this browser');
+                    }
+
+                    let selectedPort = null;
+                    const savedPortId = getCookie('lastUsedPortId');
+                    
+                    // First, try to get previously granted ports
+                    try {
+                        addToLog('Checking for previously granted serial ports...');
+                        const ports = await navigator.serial.getPorts();
+                        
+                        if (ports.length > 0) {
+                            addToLog(`Found ${ports.length} previously granted port(s)`);
+                            
+                            // Try to find the saved port first
+                            if (savedPortId) {
+                                const savedPort = ports.find(port => getPortId(port) === savedPortId);
+                                if (savedPort) {
+                                    selectedPort = savedPort;
+                                    addToLog(`Found previously used port: ${savedPortId}`);
+                                }
+                            }
+                            
+                            // If no saved port found, use the first available
+                            if (!selectedPort) {
+                                selectedPort = ports[0];
+                                const portId = getPortId(selectedPort);
+                                addToLog(`Using first available port: ${portId}`);
+                            }
+                            
+                            // Try to open the previously granted port
+                            try {
+                                addToLog(`Opening previously granted port at ${baudRate} baud (7 data bits, even parity, 1 stop bit)`);
+                                
+                                await selectedPort.open({
+                                    baudRate: baudRate,
+                                    dataBits: 7,
+                                    parity: 'even',
+                                    stopBits: 1
+                                });
+                                
+                                // Save the successfully connected port
+                                const portId = getPortId(selectedPort);
+                                setCookie('lastUsedPortId', portId);
+                                addToLog(`Successfully connected to previously granted port (${portId})`);
+                                
+                            } catch (openError) {
+                                addToLog(`Failed to open previously granted port: ${openError.message}`);
+                                selectedPort = null; // Reset so we'll show the picker
+                            }
+                        } else {
+                            addToLog('No previously granted ports found');
+                        }
+                    } catch (getPortsError) {
+                        addToLog(`Error checking for granted ports: ${getPortsError.message}`);
+                    }
+                    
+                    // If no previously granted port worked, show the picker
+                    if (!selectedPort) {
+                        addToLog('Requesting new serial port...');
+                        selectedPort = await navigator.serial.requestPort();
+                        
+                        addToLog(`Opening selected port at ${baudRate} baud (7 data bits, even parity, 1 stop bit)`);
+                        
+                        await selectedPort.open({
+                            baudRate: baudRate,
+                            dataBits: 7,
+                            parity: 'even',
+                            stopBits: 1
+                        });
+                        
+                        // Save the newly selected port
+                        const portId = getPortId(selectedPort);
+                        setCookie('lastUsedPortId', portId);
+                        addToLog(`Saved new port preference: ${portId}`);
+                    }
+
+           
