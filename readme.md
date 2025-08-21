@@ -3,6 +3,8 @@
 ## Project Overview
 A web-based digital scale interface with multiple implementation approaches - complete browser-based solutions and Python utilities for serial communication.
 
+### See /docs/SC-SE-IM_02.pdf to set 9600 baud 
+
 ## 🌐 **Web Browser Examples**
 
 ### **React CDN Version** (webserial-react-cdn.html)
